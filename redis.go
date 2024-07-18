@@ -276,26 +276,47 @@ func (c *baseClient) releaseConn(ctx context.Context, cn *pool.Conn, err error) 
 func (c *baseClient) withConn(
 	ctx context.Context, fn func(context.Context, *pool.Conn) error,
 ) error {
+	// 从连接池获取链接。
 	cn, err := c.getConn(ctx)
 	if err != nil {
 		return err
 	}
-
+	// 函数接受的时候释放连接。
 	defer func() {
 		c.releaseConn(ctx, cn, err)
 	}()
-
+	/*处理上下文取消：如果上下文没有取消 (ctx.Done() 为 nil)，则直接执行回调函数。
+	如果上下文可能取消，则在一个新的 goroutine 中执行回调函数，
+	并通过 select 语句等待上下文取消或回调完成。*/
 	done := ctx.Done() //nolint:ifshort
-
+	// 这里的fn是读写两个函数。
 	if done == nil {
 		err = fn(ctx, cn)
 		return err
 	}
-
+	// 这里创建了一个容量为 1 的错误通道 errc。这个通道用于在 goroutine 中传递回调函数 fn 执行的结果。
 	errc := make(chan error, 1)
+	// 这里启动了一个新的 goroutine 执行回调函数 fn，并将 fn 的返回结果发送到 errc 通道。
+	// 向通道里面写入fn的执行的结果，表示函数执行完毕。
+	// 【这里是执行write和read的逻辑的地方。】
 	go func() { errc <- fn(ctx, cn) }()
 
+	/*
+		select 语句用于等待多个通道操作中的一个完成。具体来说：
+
+		case <-done:：如果 ctx.Done() 通道有消息（表示上下文已取消），则执行以下操作：
+
+			关闭连接 cn，调用 cn.Close()。关闭连接的目的是尽快释放资源，并通知服务器终止未完成的请求。
+			等待 goroutine 完成并发送错误结果，<-errc。虽然上下文取消了，但仍需要等待回调函数 fn 执行完成以确保所有资源正确释放。
+			将上下文取消错误 ctx.Err() 赋值给 err 并返回。
+
+		case err = <-errc:：如果回调函数 fn 执行完成，并将错误结果发送到 errc 通道，则直接将该错误赋值给 err 并返回。
+
+
+	*/
+	// 这里没有for循环。
 	select {
+	// done是一个通道。
 	case <-done:
 		_ = cn.Close()
 		// Wait for the goroutine to finish and send something.
@@ -303,6 +324,7 @@ func (c *baseClient) withConn(
 
 		err = ctx.Err()
 		return err
+	// errc 也是一个通道。
 	case err = <-errc:
 		return err
 	}
@@ -324,6 +346,7 @@ func (c *baseClient) process(ctx context.Context, cmd Cmder) error {
 }
 
 func (c *baseClient) _process(ctx context.Context, cmd Cmder, attempt int) (bool, error) {
+	// 在后面再次尝试（attempt>0）的时候，
 	if attempt > 0 {
 		if err := internal.Sleep(ctx, c.retryBackoff(attempt)); err != nil {
 			return false, err
@@ -331,14 +354,37 @@ func (c *baseClient) _process(ctx context.Context, cmd Cmder, attempt int) (bool
 	}
 
 	retryTimeout := uint32(1)
+	// withConn函数里面，为什么
+	/*
+		func(context.Context, *pool.Conn) 是一个处理函数。
+		在 withConn 使用。
+
+		在一个连接上，同时处理请求和响应。
+
+		写入命令：通过 cn.WithWriter 方法在给定的写入超时时间内执行 writeCmd 函数，
+			将命令写入到连接的 proto.Writer 中。
+		读取响应：通过 cn.WithReader 方法在给定的读取超时时间内执行 cmd.readReply 函数，
+			从连接中读取响应。
+
+		// 搞明白 go-redis中几个数据结构的关系。这样看代码更加清楚一些。
+
+		writer和reader和 coon的关系。
+		client和conn cmd的关系。
+
+	*/
+	// 【 这个里面主要就是回调函数的注册（注册给连接conn 而不是c）。调用应该不是在这里，有另外的线程调用。】
+	// 【 go func() { errc <- fn(ctx, cn) }() 是执行逻辑的地方。 】
 	err := c.withConn(ctx, func(ctx context.Context, cn *pool.Conn) error {
+		// WithWriter 定义一个函数 函数体内容是 writeCmd(wr, cmd) 【每个命令一样】
 		err := cn.WithWriter(ctx, c.opt.WriteTimeout, func(wr *proto.Writer) error {
 			return writeCmd(wr, cmd)
 		})
 		if err != nil {
 			return err
 		}
-
+		// 什么时候有响应。
+		// cmd.readReply 是注册的 reader函数。什么时候调用呢？
+		// WithReader 注册  cmd.readReply 【根据响应的不同设置不同的响应处理函数。 】
 		err = cn.WithReader(ctx, c.cmdTimeout(cmd), cmd.readReply)
 		if err != nil {
 			if cmd.readTimeout() == nil {
@@ -349,6 +395,7 @@ func (c *baseClient) _process(ctx context.Context, cmd Cmder, attempt int) (bool
 
 		return nil
 	})
+	// 上面这里是withConn的调用 【一行。】
 	if err == nil {
 		return false, nil
 	}
@@ -560,6 +607,7 @@ func NewClient(opt *Options) *Client {
 	return &c
 }
 
+// 存在逃逸分析，clone的内容。
 func (c *Client) clone() *Client {
 	clone := *c
 	clone.cmdable = clone.Process
@@ -668,26 +716,26 @@ func (c *Client) pubSub() *PubSub {
 // subscription may not be active immediately. To force the connection to wait,
 // you may call the Receive() method on the returned *PubSub like so:
 //
-//    sub := client.Subscribe(queryResp)
-//    iface, err := sub.Receive()
-//    if err != nil {
-//        // handle error
-//    }
+//	sub := client.Subscribe(queryResp)
+//	iface, err := sub.Receive()
+//	if err != nil {
+//	    // handle error
+//	}
 //
-//    // Should be *Subscription, but others are possible if other actions have been
-//    // taken on sub since it was created.
-//    switch iface.(type) {
-//    case *Subscription:
-//        // subscribe succeeded
-//    case *Message:
-//        // received first message
-//    case *Pong:
-//        // pong received
-//    default:
-//        // handle error
-//    }
+//	// Should be *Subscription, but others are possible if other actions have been
+//	// taken on sub since it was created.
+//	switch iface.(type) {
+//	case *Subscription:
+//	    // subscribe succeeded
+//	case *Message:
+//	    // received first message
+//	case *Pong:
+//	    // pong received
+//	default:
+//	    // handle error
+//	}
 //
-//    ch := sub.Channel()
+//	ch := sub.Channel()
 func (c *Client) Subscribe(ctx context.Context, channels ...string) *PubSub {
 	pubsub := c.pubSub()
 	if len(channels) > 0 {

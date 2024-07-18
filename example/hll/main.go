@@ -13,18 +13,29 @@ func main() {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: ":6379",
 	})
-	_ = rdb.FlushDB(ctx).Err()
+	// _ = rdb.FlushDB(ctx).Err()
 
-	for i := 0; i < 10; i++ {
-		if err := rdb.PFAdd(ctx, "myset", fmt.Sprint(i)).Err(); err != nil {
-			panic(err)
-		}
+	// for i := 0; i < 1; i++ {
+	if err := rdb.SAdd(ctx, "myset", fmt.Sprint(1)).Err(); err != nil {
+		panic(err)
 	}
 
-	card, err := rdb.PFCount(ctx, "myset").Result()
+	if err := rdb.SAdd(ctx, "myset", fmt.Sprint(2)).Err(); err != nil {
+		panic(err)
+	}
+	// }
+
+	// card, err := rdb.SCard(ctx, "myset").Result()
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// fmt.Println("set cardinality", card)
+
+	mems, err := rdb.SMembers(ctx, "myset").Result()
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("set cardinality", card)
+	fmt.Println("set mems: ", mems)
 }

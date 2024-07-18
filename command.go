@@ -13,6 +13,7 @@ import (
 	"github.com/go-redis/redis/v8/internal/util"
 )
 
+// Cmder定义cmd的接口。
 type Cmder interface {
 	Name() string
 	FullName() string

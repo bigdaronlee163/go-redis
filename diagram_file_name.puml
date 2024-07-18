@@ -1,0 +1,2517 @@
+@startuml
+namespace hscan {
+    class StructValue << (S,Aquamarine) >> {
+        - spec *structSpec
+        - value reflect.Value
+
+        + Scan(key string, value string) error
+
+    }
+    class hscan.decoderFunc << (T, #FF7700) >>  {
+    }
+    class structField << (S,Aquamarine) >> {
+        - index int
+        - fn decoderFunc
+
+    }
+    class structMap << (S,Aquamarine) >> {
+        - m sync.Map
+
+        - get(t reflect.Type) *structSpec
+
+    }
+    class structSpec << (S,Aquamarine) >> {
+        - m <font color=blue>map</font>[string]*structField
+
+        - set(tag string, sf *structField) 
+
+    }
+    class "<font color=blue>func</font>(reflect.Value, string) error" as fontcolorbluefuncfontreflectValuestringerror {
+        'This class was created so that we can correctly have an alias pointing to this name. Since it contains dots that can break namespaces
+    }
+}
+
+
+namespace internal {
+    interface Logging  {
+        + Printf(ctx context.Context, format string, v ...<font color=blue>interface</font>{}) 
+
+    }
+    class Once << (S,Aquamarine) >> {
+        - m sync.Mutex
+        - done uint32
+
+        + Do(f <font color=blue>func</font>() error) error
+
+    }
+    class logger << (S,Aquamarine) >> {
+        - log *log.Logger
+
+        + Printf(ctx context.Context, format string, v ...<font color=blue>interface</font>{}) 
+
+    }
+}
+
+"internal.Logging" <|-- "internal.logger"
+
+namespace main {
+    class Model << (S,Aquamarine) >> {
+        + Str1 string
+        + Str2 string
+        + Int int
+        + Bool bool
+        + Ignored <font color=blue>struct</font>{}
+
+    }
+}
+
+
+namespace pool {
+    class BadConnError << (S,Aquamarine) >> {
+        - wrapped error
+
+        + Error() string
+        + Unwrap() error
+
+    }
+    class Conn << (S,Aquamarine) >> {
+        - usedAt int64
+        - netConn net.Conn
+        - rd *proto.Reader
+        - bw *bufio.Writer
+        - wr *proto.Writer
+        - pooled bool
+        - createdAt time.Time
+
+        + Inited bool
+
+        - deadline(ctx context.Context, timeout time.Duration) time.Time
+
+        + UsedAt() time.Time
+        + SetUsedAt(tm time.Time) 
+        + SetNetConn(netConn net.Conn) 
+        + Write(b []byte) (int, error)
+        + RemoteAddr() net.Addr
+        + WithReader(ctx context.Context, timeout time.Duration, fn <font color=blue>func</font>(*proto.Reader) error) error
+        + WithWriter(ctx context.Context, timeout time.Duration, fn <font color=blue>func</font>(*proto.Writer) error) error
+        + Close() error
+
+    }
+    class ConnPool << (S,Aquamarine) >> {
+        - opt *Options
+        - dialErrorsNum uint32
+        - lastDialError atomic.Value
+        - queue <font color=blue>chan</font> <font color=blue>struct</font>{}
+        - connsMu sync.Mutex
+        - conns []*Conn
+        - idleConns []*Conn
+        - poolSize int
+        - idleConnsLen int
+        - stats Stats
+        - closedCh <font color=blue>chan</font> <font color=blue>struct</font>{}
+
+        + _closed uint32
+
+        - checkMinIdleConns() 
+        - addIdleConn() error
+        - newConn(ctx context.Context, pooled bool) (*Conn, error)
+        - dialConn(ctx context.Context, pooled bool) (*Conn, error)
+        - tryDial() 
+        - setLastDialError(err error) 
+        - getLastDialError() error
+        - getTurn() 
+        - waitTurn(ctx context.Context) error
+        - freeTurn() 
+        - popIdle() (*Conn, error)
+        - removeConnWithLock(cn *Conn) 
+        - removeConn(cn *Conn) 
+        - closeConn(cn *Conn) error
+        - closed() bool
+        - reaper(frequency time.Duration) 
+        - reapStaleConn() *Conn
+        - isStaleConn(cn *Conn) bool
+
+        + NewConn(ctx context.Context) (*Conn, error)
+        + Get(ctx context.Context) (*Conn, error)
+        + Put(ctx context.Context, cn *Conn) 
+        + Remove(ctx context.Context, cn *Conn, reason error) 
+        + CloseConn(cn *Conn) error
+        + Len() int
+        + IdleLen() int
+        + Stats() *Stats
+        + Filter(fn <font color=blue>func</font>(*Conn) bool) error
+        + Close() error
+        + ReapStaleConns() (int, error)
+
+    }
+    class Options << (S,Aquamarine) >> {
+        + Dialer <font color=blue>func</font>(context.Context) (net.Conn, error)
+        + OnClose <font color=blue>func</font>(*Conn) error
+        + PoolFIFO bool
+        + PoolSize int
+        + MinIdleConns int
+        + MaxConnAge time.Duration
+        + PoolTimeout time.Duration
+        + IdleTimeout time.Duration
+        + IdleCheckFrequency time.Duration
+
+    }
+    interface Pooler  {
+        + NewConn( context.Context) (*Conn, error)
+        + CloseConn( *Conn) error
+        + Get( context.Context) (*Conn, error)
+        + Put( context.Context,  *Conn) 
+        + Remove( context.Context,  *Conn,  error) 
+        + Len() int
+        + IdleLen() int
+        + Stats() *Stats
+        + Close() error
+
+    }
+    class SingleConnPool << (S,Aquamarine) >> {
+        - pool Pooler
+        - cn *Conn
+        - stickyErr error
+
+        + NewConn(ctx context.Context) (*Conn, error)
+        + CloseConn(cn *Conn) error
+        + Get(ctx context.Context) (*Conn, error)
+        + Put(ctx context.Context, cn *Conn) 
+        + Remove(ctx context.Context, cn *Conn, reason error) 
+        + Close() error
+        + Len() int
+        + IdleLen() int
+        + Stats() *Stats
+
+    }
+    class Stats << (S,Aquamarine) >> {
+        + Hits uint32
+        + Misses uint32
+        + Timeouts uint32
+        + TotalConns uint32
+        + IdleConns uint32
+        + StaleConns uint32
+
+    }
+    class StickyConnPool << (S,Aquamarine) >> {
+        - pool Pooler
+        - shared int32
+        - state uint32
+        - ch <font color=blue>chan</font> *Conn
+
+        + _badConnError atomic.Value
+
+        - freeConn(ctx context.Context, cn *Conn) 
+        - badConnError() error
+
+        + NewConn(ctx context.Context) (*Conn, error)
+        + CloseConn(cn *Conn) error
+        + Get(ctx context.Context) (*Conn, error)
+        + Put(ctx context.Context, cn *Conn) 
+        + Remove(ctx context.Context, cn *Conn, reason error) 
+        + Close() error
+        + Reset(ctx context.Context) error
+        + Len() int
+        + IdleLen() int
+        + Stats() *Stats
+
+    }
+    class lastDialErrorWrap << (S,Aquamarine) >> {
+        - err error
+
+    }
+}
+
+"pool.Pooler" <|-- "pool.ConnPool"
+"pool.Pooler" <|-- "pool.SingleConnPool"
+"pool.Pooler" <|-- "pool.StickyConnPool"
+
+namespace proto {
+    class Reader << (S,Aquamarine) >> {
+        - rd *bufio.Reader
+
+        + _buf []byte
+
+        - readLine() ([]byte, error)
+        - readStringReply(line []byte) (string, error)
+        - readTmpBytesReply() ([]byte, error)
+        - buf(n int) []byte
+
+        + Buffered() int
+        + Peek(n int) ([]byte, error)
+        + Reset(rd io.Reader) 
+        + ReadLine() ([]byte, error)
+        + ReadReply(m MultiBulkParse) (<font color=blue>interface</font>{}, error)
+        + ReadIntReply() (int64, error)
+        + ReadString() (string, error)
+        + ReadArrayReply(m MultiBulkParse) (<font color=blue>interface</font>{}, error)
+        + ReadArrayLen() (int, error)
+        + ReadScanReply() ([]string, uint64, error)
+        + ReadInt() (int64, error)
+        + ReadUint() (uint64, error)
+        + ReadFloatReply() (float64, error)
+        + _readTmpBytesReply(line []byte) ([]byte, error)
+
+    }
+    class RedisError << (S,Aquamarine) >> {
+        + Error() string
+        + RedisError() 
+
+    }
+    class Writer << (S,Aquamarine) >> {
+        - lenBuf []byte
+        - numBuf []byte
+
+        - writeLen(n int) error
+        - bytes(b []byte) error
+        - string(s string) error
+        - uint(n uint64) error
+        - int(n int64) error
+        - float(f float64) error
+        - crlf() error
+
+        + WriteArgs(args []<font color=blue>interface</font>{}) error
+        + WriteArg(v <font color=blue>interface</font>{}) error
+
+    }
+    class proto.MultiBulkParse << (T, #FF7700) >>  {
+    }
+    class proto.RedisError << (T, #FF7700) >>  {
+    }
+    interface writer  {
+        + WriteString(s string) (int, error)
+
+    }
+}
+"proto.writer" *-- "proto.Writer"
+
+"redis.Error" <|-- "proto.RedisError"
+
+namespace rand {
+    class source << (S,Aquamarine) >> {
+        - src rand.Source
+        - mu sync.Mutex
+
+        + Int63() int64
+        + Seed(seed int64) 
+
+    }
+}
+
+
+namespace redis {
+    class BitCount << (S,Aquamarine) >> {
+        + Start int64
+
+    }
+    class BoolCmd << (S,Aquamarine) >> {
+        - val bool
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val bool) 
+        + Val() bool
+        + Result() (bool, error)
+        + String() string
+
+    }
+    class BoolSliceCmd << (S,Aquamarine) >> {
+        - val []bool
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []bool) 
+        + Val() []bool
+        + Result() ([]bool, error)
+        + String() string
+
+    }
+    class Client << (S,Aquamarine) >> {
+        - ctx context.Context
+
+        - clone() *Client
+        - processPipeline(ctx context.Context, cmds []Cmder) error
+        - processTxPipeline(ctx context.Context, cmds []Cmder) error
+        - pubSub() *PubSub
+        - newTx(ctx context.Context) *Tx
+
+        + WithTimeout(timeout time.Duration) *Client
+        + Context() context.Context
+        + WithContext(ctx context.Context) *Client
+        + Conn(ctx context.Context) *Conn
+        + Do(ctx context.Context, args ...<font color=blue>interface</font>{}) *Cmd
+        + Process(ctx context.Context, cmd Cmder) error
+        + Options() *Options
+        + PoolStats() *PoolStats
+        + Pipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + Pipeline() Pipeliner
+        + TxPipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + TxPipeline() Pipeliner
+        + Subscribe(ctx context.Context, channels ...string) *PubSub
+        + PSubscribe(ctx context.Context, channels ...string) *PubSub
+        + Watch(ctx context.Context, fn <font color=blue>func</font>(*Tx) error, keys ...string) error
+
+    }
+    class ClusterClient << (S,Aquamarine) >> {
+        - ctx context.Context
+
+        - process(ctx context.Context, cmd Cmder) error
+        - loadState(ctx context.Context) (*clusterState, error)
+        - reaper(idleCheckFrequency time.Duration) 
+        - processPipeline(ctx context.Context, cmds []Cmder) error
+        - mapCmdsByNode(ctx context.Context, cmdsMap *cmdsMap, cmds []Cmder) error
+        - cmdsAreReadOnly(cmds []Cmder) bool
+        - pipelineReadCmds(ctx context.Context, node *clusterNode, rd *proto.Reader, cmds []Cmder, failedCmds *cmdsMap) error
+        - checkMovedErr(ctx context.Context, cmd Cmder, err error, failedCmds *cmdsMap) bool
+        - processTxPipeline(ctx context.Context, cmds []Cmder) error
+        - mapCmdsBySlot(cmds []Cmder) <font color=blue>map</font>[int][]Cmder
+        - txPipelineReadQueued(ctx context.Context, rd *proto.Reader, statusCmd *StatusCmd, cmds []Cmder, failedCmds *cmdsMap) error
+        - cmdsMoved(ctx context.Context, cmds []Cmder, moved bool, ask bool, addr string, failedCmds *cmdsMap) error
+        - pubSub() *PubSub
+        - retryBackoff(attempt int) time.Duration
+        - cmdsInfo(ctx context.Context) (<font color=blue>map</font>[string]*CommandInfo, error)
+        - cmdInfo(name string) *CommandInfo
+        - cmdSlot(cmd Cmder) int
+        - cmdNode(ctx context.Context, cmdInfo *CommandInfo, slot int) (*clusterNode, error)
+        - slotMasterNode(ctx context.Context, slot int) (*clusterNode, error)
+
+        + Context() context.Context
+        + WithContext(ctx context.Context) *ClusterClient
+        + Options() *ClusterOptions
+        + ReloadState(ctx context.Context) 
+        + Close() error
+        + Do(ctx context.Context, args ...<font color=blue>interface</font>{}) *Cmd
+        + Process(ctx context.Context, cmd Cmder) error
+        + ForEachMaster(ctx context.Context, fn <font color=blue>func</font>(context.Context, *Client) error) error
+        + ForEachSlave(ctx context.Context, fn <font color=blue>func</font>(context.Context, *Client) error) error
+        + ForEachShard(ctx context.Context, fn <font color=blue>func</font>(context.Context, *Client) error) error
+        + PoolStats() *PoolStats
+        + Pipeline() Pipeliner
+        + Pipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + _processPipeline(ctx context.Context, cmds []Cmder) error
+        + _processPipelineNode(ctx context.Context, node *clusterNode, cmds []Cmder, failedCmds *cmdsMap) error
+        + TxPipeline() Pipeliner
+        + TxPipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + _processTxPipeline(ctx context.Context, cmds []Cmder) error
+        + _processTxPipelineNode(ctx context.Context, node *clusterNode, cmds []Cmder, failedCmds *cmdsMap) error
+        + Watch(ctx context.Context, fn <font color=blue>func</font>(*Tx) error, keys ...string) error
+        + Subscribe(ctx context.Context, channels ...string) *PubSub
+        + PSubscribe(ctx context.Context, channels ...string) *PubSub
+        + SlaveForKey(ctx context.Context, key string) (*Client, error)
+        + MasterForKey(ctx context.Context, key string) (*Client, error)
+        + DBSize(ctx context.Context) *IntCmd
+        + ScriptLoad(ctx context.Context, script string) *StringCmd
+        + ScriptFlush(ctx context.Context) *StatusCmd
+        + ScriptExists(ctx context.Context, hashes ...string) *BoolSliceCmd
+
+    }
+    class ClusterNode << (S,Aquamarine) >> {
+        + ID string
+        + Addr string
+        + NetworkingMetadata <font color=blue>map</font>[string]string
+
+    }
+    class ClusterOptions << (S,Aquamarine) >> {
+        + Addrs []string
+        + NewClient <font color=blue>func</font>(*Options) *Client
+        + MaxRedirects int
+        + ReadOnly bool
+        + RouteByLatency bool
+        + RouteRandomly bool
+        + ClusterSlots <font color=blue>func</font>(context.Context) ([]ClusterSlot, error)
+        + Dialer <font color=blue>func</font>(context.Context, string, string) (net.Conn, error)
+        + OnConnect <font color=blue>func</font>(context.Context, *Conn) error
+        + Username string
+        + Password string
+        + MaxRetries int
+        + MinRetryBackoff time.Duration
+        + MaxRetryBackoff time.Duration
+        + DialTimeout time.Duration
+        + ReadTimeout time.Duration
+        + WriteTimeout time.Duration
+        + PoolFIFO bool
+        + PoolSize int
+        + MinIdleConns int
+        + MaxConnAge time.Duration
+        + PoolTimeout time.Duration
+        + IdleTimeout time.Duration
+        + IdleCheckFrequency time.Duration
+        + TLSConfig *tls.Config
+
+        - init() 
+        - clientOptions() *Options
+
+    }
+    class ClusterSlot << (S,Aquamarine) >> {
+        + Start int
+        + End int
+        + Nodes []ClusterNode
+
+    }
+    class ClusterSlotsCmd << (S,Aquamarine) >> {
+        - val []ClusterSlot
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []ClusterSlot) 
+        + Val() []ClusterSlot
+        + Result() ([]ClusterSlot, error)
+        + String() string
+
+    }
+    class Cmd << (S,Aquamarine) >> {
+        - val <font color=blue>interface</font>{}
+
+        - readReply(rd *proto.Reader) error
+
+        + String() string
+        + SetVal(val <font color=blue>interface</font>{}) 
+        + Val() <font color=blue>interface</font>{}
+        + Result() (<font color=blue>interface</font>{}, error)
+        + Text() (string, error)
+        + Int() (int, error)
+        + Int64() (int64, error)
+        + Uint64() (uint64, error)
+        + Float32() (float32, error)
+        + Float64() (float64, error)
+        + Bool() (bool, error)
+        + Slice() ([]<font color=blue>interface</font>{}, error)
+        + StringSlice() ([]string, error)
+        + Int64Slice() ([]int64, error)
+        + Uint64Slice() ([]uint64, error)
+        + Float32Slice() ([]float32, error)
+        + Float64Slice() ([]float64, error)
+        + BoolSlice() ([]bool, error)
+
+    }
+    interface Cmdable  {
+        + Pipeline() Pipeliner
+        + Pipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + TxPipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + TxPipeline() Pipeliner
+        + Command(ctx context.Context) *CommandsInfoCmd
+        + ClientGetName(ctx context.Context) *StringCmd
+        + Echo(ctx context.Context, message <font color=blue>interface</font>{}) *StringCmd
+        + Ping(ctx context.Context) *StatusCmd
+        + Quit(ctx context.Context) *StatusCmd
+        + Del(ctx context.Context, keys ...string) *IntCmd
+        + Unlink(ctx context.Context, keys ...string) *IntCmd
+        + Dump(ctx context.Context, key string) *StringCmd
+        + Exists(ctx context.Context, keys ...string) *IntCmd
+        + Expire(ctx context.Context, key string, expiration time.Duration) *BoolCmd
+        + ExpireAt(ctx context.Context, key string, tm time.Time) *BoolCmd
+        + Keys(ctx context.Context, pattern string) *StringSliceCmd
+        + Migrate(ctx context.Context, host string, port string, key string, db int, timeout time.Duration) *StatusCmd
+        + Move(ctx context.Context, key string, db int) *BoolCmd
+        + ObjectRefCount(ctx context.Context, key string) *IntCmd
+        + ObjectEncoding(ctx context.Context, key string) *StringCmd
+        + ObjectIdleTime(ctx context.Context, key string) *DurationCmd
+        + Persist(ctx context.Context, key string) *BoolCmd
+        + PExpire(ctx context.Context, key string, expiration time.Duration) *BoolCmd
+        + PExpireAt(ctx context.Context, key string, tm time.Time) *BoolCmd
+        + PTTL(ctx context.Context, key string) *DurationCmd
+        + RandomKey(ctx context.Context) *StringCmd
+        + Rename(ctx context.Context, key string, newkey string) *StatusCmd
+        + RenameNX(ctx context.Context, key string, newkey string) *BoolCmd
+        + Restore(ctx context.Context, key string, ttl time.Duration, value string) *StatusCmd
+        + RestoreReplace(ctx context.Context, key string, ttl time.Duration, value string) *StatusCmd
+        + Sort(ctx context.Context, key string, sort *Sort) *StringSliceCmd
+        + SortStore(ctx context.Context, key string, store string, sort *Sort) *IntCmd
+        + SortInterfaces(ctx context.Context, key string, sort *Sort) *SliceCmd
+        + Touch(ctx context.Context, keys ...string) *IntCmd
+        + TTL(ctx context.Context, key string) *DurationCmd
+        + Type(ctx context.Context, key string) *StatusCmd
+        + Append(ctx context.Context, key string, value string) *IntCmd
+        + Decr(ctx context.Context, key string) *IntCmd
+        + DecrBy(ctx context.Context, key string, decrement int64) *IntCmd
+        + Get(ctx context.Context, key string) *StringCmd
+        + GetRange(ctx context.Context, key string, start int64, end int64) *StringCmd
+        + GetSet(ctx context.Context, key string, value <font color=blue>interface</font>{}) *StringCmd
+        + GetEx(ctx context.Context, key string, expiration time.Duration) *StringCmd
+        + GetDel(ctx context.Context, key string) *StringCmd
+        + Incr(ctx context.Context, key string) *IntCmd
+        + IncrBy(ctx context.Context, key string, value int64) *IntCmd
+        + IncrByFloat(ctx context.Context, key string, value float64) *FloatCmd
+        + MGet(ctx context.Context, keys ...string) *SliceCmd
+        + MSet(ctx context.Context, values ...<font color=blue>interface</font>{}) *StatusCmd
+        + MSetNX(ctx context.Context, values ...<font color=blue>interface</font>{}) *BoolCmd
+        + Set(ctx context.Context, key string, value <font color=blue>interface</font>{}, expiration time.Duration) *StatusCmd
+        + SetArgs(ctx context.Context, key string, value <font color=blue>interface</font>{}, a SetArgs) *StatusCmd
+        + SetEX(ctx context.Context, key string, value <font color=blue>interface</font>{}, expiration time.Duration) *StatusCmd
+        + SetNX(ctx context.Context, key string, value <font color=blue>interface</font>{}, expiration time.Duration) *BoolCmd
+        + SetXX(ctx context.Context, key string, value <font color=blue>interface</font>{}, expiration time.Duration) *BoolCmd
+        + SetRange(ctx context.Context, key string, offset int64, value string) *IntCmd
+        + StrLen(ctx context.Context, key string) *IntCmd
+        + Copy(ctx context.Context, sourceKey string, destKey string, db int, replace bool) *IntCmd
+        + GetBit(ctx context.Context, key string, offset int64) *IntCmd
+        + SetBit(ctx context.Context, key string, offset int64, value int) *IntCmd
+        + BitCount(ctx context.Context, key string, bitCount *BitCount) *IntCmd
+        + BitOpAnd(ctx context.Context, destKey string, keys ...string) *IntCmd
+        + BitOpOr(ctx context.Context, destKey string, keys ...string) *IntCmd
+        + BitOpXor(ctx context.Context, destKey string, keys ...string) *IntCmd
+        + BitOpNot(ctx context.Context, destKey string, key string) *IntCmd
+        + BitPos(ctx context.Context, key string, bit int64, pos ...int64) *IntCmd
+        + BitField(ctx context.Context, key string, args ...<font color=blue>interface</font>{}) *IntSliceCmd
+        + Scan(ctx context.Context, cursor uint64, match string, count int64) *ScanCmd
+        + ScanType(ctx context.Context, cursor uint64, match string, count int64, keyType string) *ScanCmd
+        + SScan(ctx context.Context, key string, cursor uint64, match string, count int64) *ScanCmd
+        + HScan(ctx context.Context, key string, cursor uint64, match string, count int64) *ScanCmd
+        + ZScan(ctx context.Context, key string, cursor uint64, match string, count int64) *ScanCmd
+        + HDel(ctx context.Context, key string, fields ...string) *IntCmd
+        + HExists(ctx context.Context, key string, field string) *BoolCmd
+        + HGet(ctx context.Context, key string, field string) *StringCmd
+        + HGetAll(ctx context.Context, key string) *StringStringMapCmd
+        + HIncrBy(ctx context.Context, key string, field string, incr int64) *IntCmd
+        + HIncrByFloat(ctx context.Context, key string, field string, incr float64) *FloatCmd
+        + HKeys(ctx context.Context, key string) *StringSliceCmd
+        + HLen(ctx context.Context, key string) *IntCmd
+        + HMGet(ctx context.Context, key string, fields ...string) *SliceCmd
+        + HSet(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + HMSet(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *BoolCmd
+        + HSetNX(ctx context.Context, key string, field string, value <font color=blue>interface</font>{}) *BoolCmd
+        + HVals(ctx context.Context, key string) *StringSliceCmd
+        + HRandField(ctx context.Context, key string, count int, withValues bool) *StringSliceCmd
+        + BLPop(ctx context.Context, timeout time.Duration, keys ...string) *StringSliceCmd
+        + BRPop(ctx context.Context, timeout time.Duration, keys ...string) *StringSliceCmd
+        + BRPopLPush(ctx context.Context, source string, destination string, timeout time.Duration) *StringCmd
+        + LIndex(ctx context.Context, key string, index int64) *StringCmd
+        + LInsert(ctx context.Context, key string, op string, pivot <font color=blue>interface</font>{}, value <font color=blue>interface</font>{}) *IntCmd
+        + LInsertBefore(ctx context.Context, key string, pivot <font color=blue>interface</font>{}, value <font color=blue>interface</font>{}) *IntCmd
+        + LInsertAfter(ctx context.Context, key string, pivot <font color=blue>interface</font>{}, value <font color=blue>interface</font>{}) *IntCmd
+        + LLen(ctx context.Context, key string) *IntCmd
+        + LPop(ctx context.Context, key string) *StringCmd
+        + LPopCount(ctx context.Context, key string, count int) *StringSliceCmd
+        + LPos(ctx context.Context, key string, value string, args LPosArgs) *IntCmd
+        + LPosCount(ctx context.Context, key string, value string, count int64, args LPosArgs) *IntSliceCmd
+        + LPush(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + LPushX(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + LRange(ctx context.Context, key string, start int64, stop int64) *StringSliceCmd
+        + LRem(ctx context.Context, key string, count int64, value <font color=blue>interface</font>{}) *IntCmd
+        + LSet(ctx context.Context, key string, index int64, value <font color=blue>interface</font>{}) *StatusCmd
+        + LTrim(ctx context.Context, key string, start int64, stop int64) *StatusCmd
+        + RPop(ctx context.Context, key string) *StringCmd
+        + RPopCount(ctx context.Context, key string, count int) *StringSliceCmd
+        + RPopLPush(ctx context.Context, source string, destination string) *StringCmd
+        + RPush(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + RPushX(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + LMove(ctx context.Context, source string, destination string, srcpos string, destpos string) *StringCmd
+        + BLMove(ctx context.Context, source string, destination string, srcpos string, destpos string, timeout time.Duration) *StringCmd
+        + SAdd(ctx context.Context, key string, members ...<font color=blue>interface</font>{}) *IntCmd
+        + SCard(ctx context.Context, key string) *IntCmd
+        + SDiff(ctx context.Context, keys ...string) *StringSliceCmd
+        + SDiffStore(ctx context.Context, destination string, keys ...string) *IntCmd
+        + SInter(ctx context.Context, keys ...string) *StringSliceCmd
+        + SInterStore(ctx context.Context, destination string, keys ...string) *IntCmd
+        + SIsMember(ctx context.Context, key string, member <font color=blue>interface</font>{}) *BoolCmd
+        + SMIsMember(ctx context.Context, key string, members ...<font color=blue>interface</font>{}) *BoolSliceCmd
+        + SMembers(ctx context.Context, key string) *StringSliceCmd
+        + SMembersMap(ctx context.Context, key string) *StringStructMapCmd
+        + SMove(ctx context.Context, source string, destination string, member <font color=blue>interface</font>{}) *BoolCmd
+        + SPop(ctx context.Context, key string) *StringCmd
+        + SPopN(ctx context.Context, key string, count int64) *StringSliceCmd
+        + SRandMember(ctx context.Context, key string) *StringCmd
+        + SRandMemberN(ctx context.Context, key string, count int64) *StringSliceCmd
+        + SRem(ctx context.Context, key string, members ...<font color=blue>interface</font>{}) *IntCmd
+        + SUnion(ctx context.Context, keys ...string) *StringSliceCmd
+        + SUnionStore(ctx context.Context, destination string, keys ...string) *IntCmd
+        + XAdd(ctx context.Context, a *XAddArgs) *StringCmd
+        + XDel(ctx context.Context, stream string, ids ...string) *IntCmd
+        + XLen(ctx context.Context, stream string) *IntCmd
+        + XRange(ctx context.Context, stream string, start string, stop string) *XMessageSliceCmd
+        + XRangeN(ctx context.Context, stream string, start string, stop string, count int64) *XMessageSliceCmd
+        + XRevRange(ctx context.Context, stream string, start string, stop string) *XMessageSliceCmd
+        + XRevRangeN(ctx context.Context, stream string, start string, stop string, count int64) *XMessageSliceCmd
+        + XRead(ctx context.Context, a *XReadArgs) *XStreamSliceCmd
+        + XReadStreams(ctx context.Context, streams ...string) *XStreamSliceCmd
+        + XGroupCreate(ctx context.Context, stream string, group string, start string) *StatusCmd
+        + XGroupCreateMkStream(ctx context.Context, stream string, group string, start string) *StatusCmd
+        + XGroupSetID(ctx context.Context, stream string, group string, start string) *StatusCmd
+        + XGroupDestroy(ctx context.Context, stream string, group string) *IntCmd
+        + XGroupCreateConsumer(ctx context.Context, stream string, group string, consumer string) *IntCmd
+        + XGroupDelConsumer(ctx context.Context, stream string, group string, consumer string) *IntCmd
+        + XReadGroup(ctx context.Context, a *XReadGroupArgs) *XStreamSliceCmd
+        + XAck(ctx context.Context, stream string, group string, ids ...string) *IntCmd
+        + XPending(ctx context.Context, stream string, group string) *XPendingCmd
+        + XPendingExt(ctx context.Context, a *XPendingExtArgs) *XPendingExtCmd
+        + XClaim(ctx context.Context, a *XClaimArgs) *XMessageSliceCmd
+        + XClaimJustID(ctx context.Context, a *XClaimArgs) *StringSliceCmd
+        + XAutoClaim(ctx context.Context, a *XAutoClaimArgs) *XAutoClaimCmd
+        + XAutoClaimJustID(ctx context.Context, a *XAutoClaimArgs) *XAutoClaimJustIDCmd
+        + XTrim(ctx context.Context, key string, maxLen int64) *IntCmd
+        + XTrimApprox(ctx context.Context, key string, maxLen int64) *IntCmd
+        + XTrimMaxLen(ctx context.Context, key string, maxLen int64) *IntCmd
+        + XTrimMaxLenApprox(ctx context.Context, key string, maxLen int64, limit int64) *IntCmd
+        + XTrimMinID(ctx context.Context, key string, minID string) *IntCmd
+        + XTrimMinIDApprox(ctx context.Context, key string, minID string, limit int64) *IntCmd
+        + XInfoGroups(ctx context.Context, key string) *XInfoGroupsCmd
+        + XInfoStream(ctx context.Context, key string) *XInfoStreamCmd
+        + XInfoStreamFull(ctx context.Context, key string, count int) *XInfoStreamFullCmd
+        + XInfoConsumers(ctx context.Context, key string, group string) *XInfoConsumersCmd
+        + BZPopMax(ctx context.Context, timeout time.Duration, keys ...string) *ZWithKeyCmd
+        + BZPopMin(ctx context.Context, timeout time.Duration, keys ...string) *ZWithKeyCmd
+        + ZAdd(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddNX(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddXX(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddCh(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddNXCh(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddXXCh(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddArgs(ctx context.Context, key string, args ZAddArgs) *IntCmd
+        + ZAddArgsIncr(ctx context.Context, key string, args ZAddArgs) *FloatCmd
+        + ZIncr(ctx context.Context, key string, member *Z) *FloatCmd
+        + ZIncrNX(ctx context.Context, key string, member *Z) *FloatCmd
+        + ZIncrXX(ctx context.Context, key string, member *Z) *FloatCmd
+        + ZCard(ctx context.Context, key string) *IntCmd
+        + ZCount(ctx context.Context, key string, min string, max string) *IntCmd
+        + ZLexCount(ctx context.Context, key string, min string, max string) *IntCmd
+        + ZIncrBy(ctx context.Context, key string, increment float64, member string) *FloatCmd
+        + ZInter(ctx context.Context, store *ZStore) *StringSliceCmd
+        + ZInterWithScores(ctx context.Context, store *ZStore) *ZSliceCmd
+        + ZInterStore(ctx context.Context, destination string, store *ZStore) *IntCmd
+        + ZMScore(ctx context.Context, key string, members ...string) *FloatSliceCmd
+        + ZPopMax(ctx context.Context, key string, count ...int64) *ZSliceCmd
+        + ZPopMin(ctx context.Context, key string, count ...int64) *ZSliceCmd
+        + ZRange(ctx context.Context, key string, start int64, stop int64) *StringSliceCmd
+        + ZRangeWithScores(ctx context.Context, key string, start int64, stop int64) *ZSliceCmd
+        + ZRangeByScore(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd
+        + ZRangeByLex(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd
+        + ZRangeByScoreWithScores(ctx context.Context, key string, opt *ZRangeBy) *ZSliceCmd
+        + ZRangeArgs(ctx context.Context, z ZRangeArgs) *StringSliceCmd
+        + ZRangeArgsWithScores(ctx context.Context, z ZRangeArgs) *ZSliceCmd
+        + ZRangeStore(ctx context.Context, dst string, z ZRangeArgs) *IntCmd
+        + ZRank(ctx context.Context, key string, member string) *IntCmd
+        + ZRem(ctx context.Context, key string, members ...<font color=blue>interface</font>{}) *IntCmd
+        + ZRemRangeByRank(ctx context.Context, key string, start int64, stop int64) *IntCmd
+        + ZRemRangeByScore(ctx context.Context, key string, min string, max string) *IntCmd
+        + ZRemRangeByLex(ctx context.Context, key string, min string, max string) *IntCmd
+        + ZRevRange(ctx context.Context, key string, start int64, stop int64) *StringSliceCmd
+        + ZRevRangeWithScores(ctx context.Context, key string, start int64, stop int64) *ZSliceCmd
+        + ZRevRangeByScore(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd
+        + ZRevRangeByLex(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd
+        + ZRevRangeByScoreWithScores(ctx context.Context, key string, opt *ZRangeBy) *ZSliceCmd
+        + ZRevRank(ctx context.Context, key string, member string) *IntCmd
+        + ZScore(ctx context.Context, key string, member string) *FloatCmd
+        + ZUnionStore(ctx context.Context, dest string, store *ZStore) *IntCmd
+        + ZUnion(ctx context.Context, store ZStore) *StringSliceCmd
+        + ZUnionWithScores(ctx context.Context, store ZStore) *ZSliceCmd
+        + ZRandMember(ctx context.Context, key string, count int, withScores bool) *StringSliceCmd
+        + ZDiff(ctx context.Context, keys ...string) *StringSliceCmd
+        + ZDiffWithScores(ctx context.Context, keys ...string) *ZSliceCmd
+        + ZDiffStore(ctx context.Context, destination string, keys ...string) *IntCmd
+        + PFAdd(ctx context.Context, key string, els ...<font color=blue>interface</font>{}) *IntCmd
+        + PFCount(ctx context.Context, keys ...string) *IntCmd
+        + PFMerge(ctx context.Context, dest string, keys ...string) *StatusCmd
+        + BgRewriteAOF(ctx context.Context) *StatusCmd
+        + BgSave(ctx context.Context) *StatusCmd
+        + ClientKill(ctx context.Context, ipPort string) *StatusCmd
+        + ClientKillByFilter(ctx context.Context, keys ...string) *IntCmd
+        + ClientList(ctx context.Context) *StringCmd
+        + ClientPause(ctx context.Context, dur time.Duration) *BoolCmd
+        + ClientID(ctx context.Context) *IntCmd
+        + ConfigGet(ctx context.Context, parameter string) *SliceCmd
+        + ConfigResetStat(ctx context.Context) *StatusCmd
+        + ConfigSet(ctx context.Context, parameter string, value string) *StatusCmd
+        + ConfigRewrite(ctx context.Context) *StatusCmd
+        + DBSize(ctx context.Context) *IntCmd
+        + FlushAll(ctx context.Context) *StatusCmd
+        + FlushAllAsync(ctx context.Context) *StatusCmd
+        + FlushDB(ctx context.Context) *StatusCmd
+        + FlushDBAsync(ctx context.Context) *StatusCmd
+        + Info(ctx context.Context, section ...string) *StringCmd
+        + LastSave(ctx context.Context) *IntCmd
+        + Save(ctx context.Context) *StatusCmd
+        + Shutdown(ctx context.Context) *StatusCmd
+        + ShutdownSave(ctx context.Context) *StatusCmd
+        + ShutdownNoSave(ctx context.Context) *StatusCmd
+        + SlaveOf(ctx context.Context, host string, port string) *StatusCmd
+        + Time(ctx context.Context) *TimeCmd
+        + DebugObject(ctx context.Context, key string) *StringCmd
+        + ReadOnly(ctx context.Context) *StatusCmd
+        + ReadWrite(ctx context.Context) *StatusCmd
+        + MemoryUsage(ctx context.Context, key string, samples ...int) *IntCmd
+        + Eval(ctx context.Context, script string, keys []string, args ...<font color=blue>interface</font>{}) *Cmd
+        + EvalSha(ctx context.Context, sha1 string, keys []string, args ...<font color=blue>interface</font>{}) *Cmd
+        + ScriptExists(ctx context.Context, hashes ...string) *BoolSliceCmd
+        + ScriptFlush(ctx context.Context) *StatusCmd
+        + ScriptKill(ctx context.Context) *StatusCmd
+        + ScriptLoad(ctx context.Context, script string) *StringCmd
+        + Publish(ctx context.Context, channel string, message <font color=blue>interface</font>{}) *IntCmd
+        + PubSubChannels(ctx context.Context, pattern string) *StringSliceCmd
+        + PubSubNumSub(ctx context.Context, channels ...string) *StringIntMapCmd
+        + PubSubNumPat(ctx context.Context) *IntCmd
+        + ClusterSlots(ctx context.Context) *ClusterSlotsCmd
+        + ClusterNodes(ctx context.Context) *StringCmd
+        + ClusterMeet(ctx context.Context, host string, port string) *StatusCmd
+        + ClusterForget(ctx context.Context, nodeID string) *StatusCmd
+        + ClusterReplicate(ctx context.Context, nodeID string) *StatusCmd
+        + ClusterResetSoft(ctx context.Context) *StatusCmd
+        + ClusterResetHard(ctx context.Context) *StatusCmd
+        + ClusterInfo(ctx context.Context) *StringCmd
+        + ClusterKeySlot(ctx context.Context, key string) *IntCmd
+        + ClusterGetKeysInSlot(ctx context.Context, slot int, count int) *StringSliceCmd
+        + ClusterCountFailureReports(ctx context.Context, nodeID string) *IntCmd
+        + ClusterCountKeysInSlot(ctx context.Context, slot int) *IntCmd
+        + ClusterDelSlots(ctx context.Context, slots ...int) *StatusCmd
+        + ClusterDelSlotsRange(ctx context.Context, min int, max int) *StatusCmd
+        + ClusterSaveConfig(ctx context.Context) *StatusCmd
+        + ClusterSlaves(ctx context.Context, nodeID string) *StringSliceCmd
+        + ClusterFailover(ctx context.Context) *StatusCmd
+        + ClusterAddSlots(ctx context.Context, slots ...int) *StatusCmd
+        + ClusterAddSlotsRange(ctx context.Context, min int, max int) *StatusCmd
+        + GeoAdd(ctx context.Context, key string, geoLocation ...*GeoLocation) *IntCmd
+        + GeoPos(ctx context.Context, key string, members ...string) *GeoPosCmd
+        + GeoRadius(ctx context.Context, key string, longitude float64, latitude float64, query *GeoRadiusQuery) *GeoLocationCmd
+        + GeoRadiusStore(ctx context.Context, key string, longitude float64, latitude float64, query *GeoRadiusQuery) *IntCmd
+        + GeoRadiusByMember(ctx context.Context, key string, member string, query *GeoRadiusQuery) *GeoLocationCmd
+        + GeoRadiusByMemberStore(ctx context.Context, key string, member string, query *GeoRadiusQuery) *IntCmd
+        + GeoSearch(ctx context.Context, key string, q *GeoSearchQuery) *StringSliceCmd
+        + GeoSearchLocation(ctx context.Context, key string, q *GeoSearchLocationQuery) *GeoSearchLocationCmd
+        + GeoSearchStore(ctx context.Context, key string, store string, q *GeoSearchStoreQuery) *IntCmd
+        + GeoDist(ctx context.Context, key string, member1 string, member2 string, unit string) *FloatCmd
+        + GeoHash(ctx context.Context, key string, members ...string) *StringSliceCmd
+
+    }
+    interface Cmder  {
+        - stringArg( int) string
+        - firstKeyPos() int8
+        - readTimeout() *time.Duration
+        - readReply(rd *proto.Reader) error
+
+        + Name() string
+        + FullName() string
+        + Args() []<font color=blue>interface</font>{}
+        + String() string
+        + SetFirstKeyPos( int8) 
+        + SetErr( error) 
+        + Err() error
+
+    }
+    class CommandInfo << (S,Aquamarine) >> {
+        + Name string
+        + Arity int8
+        + Flags []string
+        + ACLFlags []string
+        + FirstKeyPos int8
+        + LastKeyPos int8
+        + StepCount int8
+        + ReadOnly bool
+
+    }
+    class CommandsInfoCmd << (S,Aquamarine) >> {
+        - val <font color=blue>map</font>[string]*CommandInfo
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val <font color=blue>map</font>[string]*CommandInfo) 
+        + Val() <font color=blue>map</font>[string]*CommandInfo
+        + Result() (<font color=blue>map</font>[string]*CommandInfo, error)
+        + String() string
+
+    }
+    class Conn << (S,Aquamarine) >> {
+        - ctx context.Context
+
+        - processPipeline(ctx context.Context, cmds []Cmder) error
+        - processTxPipeline(ctx context.Context, cmds []Cmder) error
+
+        + Process(ctx context.Context, cmd Cmder) error
+        + Pipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + Pipeline() Pipeliner
+        + TxPipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + TxPipeline() Pipeliner
+
+    }
+    interface ConsistentHash  {
+        + Get( string) string
+
+    }
+    class DurationCmd << (S,Aquamarine) >> {
+        - val time.Duration
+        - precision time.Duration
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val time.Duration) 
+        + Val() time.Duration
+        + Result() (time.Duration, error)
+        + String() string
+
+    }
+    interface Error  {
+        + RedisError() 
+
+    }
+    class FailoverOptions << (S,Aquamarine) >> {
+        + MasterName string
+        + SentinelAddrs []string
+        + SentinelUsername string
+        + SentinelPassword string
+        + RouteByLatency bool
+        + RouteRandomly bool
+        + SlaveOnly bool
+        + UseDisconnectedSlaves bool
+        + Dialer <font color=blue>func</font>(context.Context, string, string) (net.Conn, error)
+        + OnConnect <font color=blue>func</font>(context.Context, *Conn) error
+        + Username string
+        + Password string
+        + DB int
+        + MaxRetries int
+        + MinRetryBackoff time.Duration
+        + MaxRetryBackoff time.Duration
+        + DialTimeout time.Duration
+        + ReadTimeout time.Duration
+        + WriteTimeout time.Duration
+        + PoolFIFO bool
+        + PoolSize int
+        + MinIdleConns int
+        + MaxConnAge time.Duration
+        + PoolTimeout time.Duration
+        + IdleTimeout time.Duration
+        + IdleCheckFrequency time.Duration
+        + TLSConfig *tls.Config
+
+        - clientOptions() *Options
+        - sentinelOptions(addr string) *Options
+        - clusterOptions() *ClusterOptions
+
+    }
+    class FloatCmd << (S,Aquamarine) >> {
+        - val float64
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val float64) 
+        + Val() float64
+        + Result() (float64, error)
+        + String() string
+
+    }
+    class FloatSliceCmd << (S,Aquamarine) >> {
+        - val []float64
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []float64) 
+        + Val() []float64
+        + Result() ([]float64, error)
+        + String() string
+
+    }
+    class GeoLocation << (S,Aquamarine) >> {
+        + Name string
+        + Longitude float64
+        + GeoHash int64
+
+    }
+    class GeoLocationCmd << (S,Aquamarine) >> {
+        - q *GeoRadiusQuery
+        - locations []GeoLocation
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(locations []GeoLocation) 
+        + Val() []GeoLocation
+        + Result() ([]GeoLocation, error)
+        + String() string
+
+    }
+    class GeoPos << (S,Aquamarine) >> {
+        + Longitude float64
+
+    }
+    class GeoPosCmd << (S,Aquamarine) >> {
+        - val []*GeoPos
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []*GeoPos) 
+        + Val() []*GeoPos
+        + Result() ([]*GeoPos, error)
+        + String() string
+
+    }
+    class GeoRadiusQuery << (S,Aquamarine) >> {
+        + Radius float64
+        + Unit string
+        + WithCoord bool
+        + WithDist bool
+        + WithGeoHash bool
+        + Count int
+        + Sort string
+        + Store string
+        + StoreDist string
+
+    }
+    class GeoSearchLocationCmd << (S,Aquamarine) >> {
+        - opt *GeoSearchLocationQuery
+        - val []GeoLocation
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []GeoLocation) 
+        + Val() []GeoLocation
+        + Result() ([]GeoLocation, error)
+        + String() string
+
+    }
+    class GeoSearchLocationQuery << (S,Aquamarine) >> {
+        + WithCoord bool
+        + WithDist bool
+        + WithHash bool
+
+    }
+    class GeoSearchQuery << (S,Aquamarine) >> {
+        + Member string
+        + Longitude float64
+        + Latitude float64
+        + Radius float64
+        + RadiusUnit string
+        + BoxWidth float64
+        + BoxHeight float64
+        + BoxUnit string
+        + Sort string
+        + Count int
+        + CountAny bool
+
+    }
+    class GeoSearchStoreQuery << (S,Aquamarine) >> {
+        + StoreDist bool
+
+    }
+    interface Hook  {
+        + BeforeProcess(ctx context.Context, cmd Cmder) (context.Context, error)
+        + AfterProcess(ctx context.Context, cmd Cmder) error
+        + BeforeProcessPipeline(ctx context.Context, cmds []Cmder) (context.Context, error)
+        + AfterProcessPipeline(ctx context.Context, cmds []Cmder) error
+
+    }
+    class IntCmd << (S,Aquamarine) >> {
+        - val int64
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val int64) 
+        + Val() int64
+        + Result() (int64, error)
+        + Uint64() (uint64, error)
+        + String() string
+
+    }
+    class IntSliceCmd << (S,Aquamarine) >> {
+        - val []int64
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []int64) 
+        + Val() []int64
+        + Result() ([]int64, error)
+        + String() string
+
+    }
+    class LPosArgs << (S,Aquamarine) >> {
+        + Rank int64
+
+    }
+    interface Limiter  {
+        + Allow() error
+        + ReportResult(result error) 
+
+    }
+    class Message << (S,Aquamarine) >> {
+        + Channel string
+        + Pattern string
+        + Payload string
+        + PayloadSlice []string
+
+        + String() string
+
+    }
+    class Options << (S,Aquamarine) >> {
+        - readOnly bool
+
+        + Network string
+        + Addr string
+        + Dialer <font color=blue>func</font>(context.Context, string, string) (net.Conn, error)
+        + OnConnect <font color=blue>func</font>(context.Context, *Conn) error
+        + Username string
+        + Password string
+        + CredentialsProvider <font color=blue>func</font>() (string, string)
+        + DB int
+        + MaxRetries int
+        + MinRetryBackoff time.Duration
+        + MaxRetryBackoff time.Duration
+        + DialTimeout time.Duration
+        + ReadTimeout time.Duration
+        + WriteTimeout time.Duration
+        + PoolFIFO bool
+        + PoolSize int
+        + MinIdleConns int
+        + MaxConnAge time.Duration
+        + PoolTimeout time.Duration
+        + IdleTimeout time.Duration
+        + IdleCheckFrequency time.Duration
+        + TLSConfig *tls.Config
+        + Limiter Limiter
+
+        - init() 
+        - clone() *Options
+
+    }
+    class Pipeline << (S,Aquamarine) >> {
+        - ctx context.Context
+        - exec pipelineExecer
+        - mu sync.Mutex
+        - cmds []Cmder
+        - closed bool
+
+        - init() 
+        - discard() error
+
+        + Len() int
+        + Do(ctx context.Context, args ...<font color=blue>interface</font>{}) *Cmd
+        + Process(ctx context.Context, cmd Cmder) error
+        + Close() error
+        + Discard() error
+        + Exec(ctx context.Context) ([]Cmder, error)
+        + Pipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + Pipeline() Pipeliner
+        + TxPipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + TxPipeline() Pipeliner
+
+    }
+    interface Pipeliner  {
+        + Len() int
+        + Do(ctx context.Context, args ...<font color=blue>interface</font>{}) *Cmd
+        + Process(ctx context.Context, cmd Cmder) error
+        + Close() error
+        + Discard() error
+        + Exec(ctx context.Context) ([]Cmder, error)
+
+    }
+    class Pong << (S,Aquamarine) >> {
+        + Payload string
+
+        + String() string
+
+    }
+    class PubSub << (S,Aquamarine) >> {
+        - opt *Options
+        - newConn <font color=blue>func</font>(context.Context, []string) (*pool.Conn, error)
+        - closeConn <font color=blue>func</font>(*pool.Conn) error
+        - mu sync.Mutex
+        - cn *pool.Conn
+        - channels <font color=blue>map</font>[string]<font color=blue>struct</font>{}
+        - patterns <font color=blue>map</font>[string]<font color=blue>struct</font>{}
+        - closed bool
+        - exit <font color=blue>chan</font> <font color=blue>struct</font>{}
+        - cmd *Cmd
+        - chOnce sync.Once
+        - msgCh *channel
+        - allCh *channel
+
+        - init() 
+        - connWithLock(ctx context.Context) (*pool.Conn, error)
+        - conn(ctx context.Context, newChannels []string) (*pool.Conn, error)
+        - writeCmd(ctx context.Context, cn *pool.Conn, cmd Cmder) error
+        - resubscribe(ctx context.Context, cn *pool.Conn) error
+        - releaseConnWithLock(ctx context.Context, cn *pool.Conn, err error, allowTimeout bool) 
+        - releaseConn(ctx context.Context, cn *pool.Conn, err error, allowTimeout bool) 
+        - reconnect(ctx context.Context, reason error) 
+        - closeTheCn(reason error) error
+        - subscribe(ctx context.Context, redisCmd string, channels ...string) error
+        - newMessage(reply <font color=blue>interface</font>{}) (<font color=blue>interface</font>{}, error)
+        - getContext() context.Context
+
+        + String() string
+        + _subscribe(ctx context.Context, cn *pool.Conn, redisCmd string, channels []string) error
+        + Close() error
+        + Subscribe(ctx context.Context, channels ...string) error
+        + PSubscribe(ctx context.Context, patterns ...string) error
+        + Unsubscribe(ctx context.Context, channels ...string) error
+        + PUnsubscribe(ctx context.Context, patterns ...string) error
+        + Ping(ctx context.Context, payload ...string) error
+        + ReceiveTimeout(ctx context.Context, timeout time.Duration) (<font color=blue>interface</font>{}, error)
+        + Receive(ctx context.Context) (<font color=blue>interface</font>{}, error)
+        + ReceiveMessage(ctx context.Context) (*Message, error)
+        + Channel(opts ...ChannelOption) <font color=blue>chan</font> *Message
+        + ChannelSize(size int) <font color=blue>chan</font> *Message
+        + ChannelWithSubscriptions(_ context.Context, size int) <font color=blue>chan</font> <font color=blue>interface</font>{}
+
+    }
+    class Ring << (S,Aquamarine) >> {
+        - ctx context.Context
+
+        - retryBackoff(attempt int) time.Duration
+        - cmdsInfo(ctx context.Context) (<font color=blue>map</font>[string]*CommandInfo, error)
+        - cmdInfo(ctx context.Context, name string) *CommandInfo
+        - cmdShard(ctx context.Context, cmd Cmder) (*ringShard, error)
+        - process(ctx context.Context, cmd Cmder) error
+        - processPipeline(ctx context.Context, cmds []Cmder) error
+        - processTxPipeline(ctx context.Context, cmds []Cmder) error
+        - generalProcessPipeline(ctx context.Context, cmds []Cmder, tx bool) error
+        - processShardPipeline(ctx context.Context, hash string, cmds []Cmder, tx bool) error
+
+        + Context() context.Context
+        + WithContext(ctx context.Context) *Ring
+        + Do(ctx context.Context, args ...<font color=blue>interface</font>{}) *Cmd
+        + Process(ctx context.Context, cmd Cmder) error
+        + Options() *RingOptions
+        + PoolStats() *PoolStats
+        + Len() int
+        + Subscribe(ctx context.Context, channels ...string) *PubSub
+        + PSubscribe(ctx context.Context, channels ...string) *PubSub
+        + ForEachShard(ctx context.Context, fn <font color=blue>func</font>(context.Context, *Client) error) error
+        + Pipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + Pipeline() Pipeliner
+        + TxPipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + TxPipeline() Pipeliner
+        + Watch(ctx context.Context, fn <font color=blue>func</font>(*Tx) error, keys ...string) error
+        + Close() error
+
+    }
+    class RingOptions << (S,Aquamarine) >> {
+        + Addrs <font color=blue>map</font>[string]string
+        + NewClient <font color=blue>func</font>(string, *Options) *Client
+        + HeartbeatFrequency time.Duration
+        + NewConsistentHash <font color=blue>func</font>([]string) ConsistentHash
+        + Dialer <font color=blue>func</font>(context.Context, string, string) (net.Conn, error)
+        + OnConnect <font color=blue>func</font>(context.Context, *Conn) error
+        + Username string
+        + Password string
+        + DB int
+        + MaxRetries int
+        + MinRetryBackoff time.Duration
+        + MaxRetryBackoff time.Duration
+        + DialTimeout time.Duration
+        + ReadTimeout time.Duration
+        + WriteTimeout time.Duration
+        + PoolFIFO bool
+        + PoolSize int
+        + MinIdleConns int
+        + MaxConnAge time.Duration
+        + PoolTimeout time.Duration
+        + IdleTimeout time.Duration
+        + IdleCheckFrequency time.Duration
+        + TLSConfig *tls.Config
+        + Limiter Limiter
+
+        - init() 
+        - clientOptions() *Options
+
+    }
+    class ScanCmd << (S,Aquamarine) >> {
+        - page []string
+        - cursor uint64
+        - process cmdable
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(page []string, cursor uint64) 
+        + Val() ([]string, uint64)
+        + Result() ([]string, uint64, error)
+        + String() string
+        + Iterator() *ScanIterator
+
+    }
+    class ScanIterator << (S,Aquamarine) >> {
+        - cmd *ScanCmd
+        - pos int
+
+        + Err() error
+        + Next(ctx context.Context) bool
+        + Val() string
+
+    }
+    class Script << (S,Aquamarine) >> {
+        - src string
+
+        + Hash() string
+        + Load(ctx context.Context, c Scripter) *StringCmd
+        + Exists(ctx context.Context, c Scripter) *BoolSliceCmd
+        + Eval(ctx context.Context, c Scripter, keys []string, args ...<font color=blue>interface</font>{}) *Cmd
+        + EvalSha(ctx context.Context, c Scripter, keys []string, args ...<font color=blue>interface</font>{}) *Cmd
+        + Run(ctx context.Context, c Scripter, keys []string, args ...<font color=blue>interface</font>{}) *Cmd
+
+    }
+    interface Scripter  {
+        + Eval(ctx context.Context, script string, keys []string, args ...<font color=blue>interface</font>{}) *Cmd
+        + EvalSha(ctx context.Context, sha1 string, keys []string, args ...<font color=blue>interface</font>{}) *Cmd
+        + ScriptExists(ctx context.Context, hashes ...string) *BoolSliceCmd
+        + ScriptLoad(ctx context.Context, script string) *StringCmd
+
+    }
+    class SentinelClient << (S,Aquamarine) >> {
+        - ctx context.Context
+
+        - pubSub() *PubSub
+
+        + Context() context.Context
+        + WithContext(ctx context.Context) *SentinelClient
+        + Process(ctx context.Context, cmd Cmder) error
+        + Ping(ctx context.Context) *StringCmd
+        + Subscribe(ctx context.Context, channels ...string) *PubSub
+        + PSubscribe(ctx context.Context, channels ...string) *PubSub
+        + GetMasterAddrByName(ctx context.Context, name string) *StringSliceCmd
+        + Sentinels(ctx context.Context, name string) *SliceCmd
+        + Failover(ctx context.Context, name string) *StatusCmd
+        + Reset(ctx context.Context, pattern string) *IntCmd
+        + FlushConfig(ctx context.Context) *StatusCmd
+        + Master(ctx context.Context, name string) *StringStringMapCmd
+        + Masters(ctx context.Context) *SliceCmd
+        + Slaves(ctx context.Context, name string) *SliceCmd
+        + CkQuorum(ctx context.Context, name string) *StringCmd
+        + Monitor(ctx context.Context, name string, ip string, port string, quorum string) *StringCmd
+        + Set(ctx context.Context, name string, option string, value string) *StringCmd
+        + Remove(ctx context.Context, name string) *StringCmd
+
+    }
+    class SetArgs << (S,Aquamarine) >> {
+        + Mode string
+        + TTL time.Duration
+        + ExpireAt time.Time
+        + Get bool
+        + KeepTTL bool
+
+    }
+    class SliceCmd << (S,Aquamarine) >> {
+        - val []<font color=blue>interface</font>{}
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []<font color=blue>interface</font>{}) 
+        + Val() []<font color=blue>interface</font>{}
+        + Result() ([]<font color=blue>interface</font>{}, error)
+        + String() string
+        + Scan(dst <font color=blue>interface</font>{}) error
+
+    }
+    class SlowLog << (S,Aquamarine) >> {
+        + ID int64
+        + Time time.Time
+        + Duration time.Duration
+        + Args []string
+        + ClientAddr string
+        + ClientName string
+
+    }
+    class SlowLogCmd << (S,Aquamarine) >> {
+        - val []SlowLog
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []SlowLog) 
+        + Val() []SlowLog
+        + Result() ([]SlowLog, error)
+        + String() string
+
+    }
+    class Sort << (S,Aquamarine) >> {
+        + By string
+        + Offset int64
+        + Get []string
+        + Order string
+        + Alpha bool
+
+        - args(key string) []<font color=blue>interface</font>{}
+
+    }
+    interface StatefulCmdable  {
+        + Auth(ctx context.Context, password string) *StatusCmd
+        + AuthACL(ctx context.Context, username string, password string) *StatusCmd
+        + Select(ctx context.Context, index int) *StatusCmd
+        + SwapDB(ctx context.Context, index1 int, index2 int) *StatusCmd
+        + ClientSetName(ctx context.Context, name string) *BoolCmd
+
+    }
+    class StatusCmd << (S,Aquamarine) >> {
+        - val string
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val string) 
+        + Val() string
+        + Result() (string, error)
+        + String() string
+
+    }
+    class StringCmd << (S,Aquamarine) >> {
+        - val string
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val string) 
+        + Val() string
+        + Result() (string, error)
+        + Bytes() ([]byte, error)
+        + Bool() (bool, error)
+        + Int() (int, error)
+        + Int64() (int64, error)
+        + Uint64() (uint64, error)
+        + Float32() (float32, error)
+        + Float64() (float64, error)
+        + Time() (time.Time, error)
+        + Scan(val <font color=blue>interface</font>{}) error
+        + String() string
+
+    }
+    class StringIntMapCmd << (S,Aquamarine) >> {
+        - val <font color=blue>map</font>[string]int64
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val <font color=blue>map</font>[string]int64) 
+        + Val() <font color=blue>map</font>[string]int64
+        + Result() (<font color=blue>map</font>[string]int64, error)
+        + String() string
+
+    }
+    class StringSliceCmd << (S,Aquamarine) >> {
+        - val []string
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []string) 
+        + Val() []string
+        + Result() ([]string, error)
+        + String() string
+        + ScanSlice(container <font color=blue>interface</font>{}) error
+
+    }
+    class StringStringMapCmd << (S,Aquamarine) >> {
+        - val <font color=blue>map</font>[string]string
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val <font color=blue>map</font>[string]string) 
+        + Val() <font color=blue>map</font>[string]string
+        + Result() (<font color=blue>map</font>[string]string, error)
+        + String() string
+        + Scan(dest <font color=blue>interface</font>{}) error
+
+    }
+    class StringStructMapCmd << (S,Aquamarine) >> {
+        - val <font color=blue>map</font>[string]<font color=blue>struct</font>{}
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val <font color=blue>map</font>[string]<font color=blue>struct</font>{}) 
+        + Val() <font color=blue>map</font>[string]<font color=blue>struct</font>{}
+        + Result() (<font color=blue>map</font>[string]<font color=blue>struct</font>{}, error)
+        + String() string
+
+    }
+    class Subscription << (S,Aquamarine) >> {
+        + Kind string
+        + Channel string
+        + Count int
+
+        + String() string
+
+    }
+    class TimeCmd << (S,Aquamarine) >> {
+        - val time.Time
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val time.Time) 
+        + Val() time.Time
+        + Result() (time.Time, error)
+        + String() string
+
+    }
+    class Tx << (S,Aquamarine) >> {
+        - ctx context.Context
+
+        - init() 
+
+        + Context() context.Context
+        + WithContext(ctx context.Context) *Tx
+        + Process(ctx context.Context, cmd Cmder) error
+        + Close(ctx context.Context) error
+        + Watch(ctx context.Context, keys ...string) *StatusCmd
+        + Unwatch(ctx context.Context, keys ...string) *StatusCmd
+        + Pipeline() Pipeliner
+        + Pipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + TxPipelined(ctx context.Context, fn <font color=blue>func</font>(Pipeliner) error) ([]Cmder, error)
+        + TxPipeline() Pipeliner
+
+    }
+    interface UniversalClient  {
+        + Context() context.Context
+        + AddHook( Hook) 
+        + Watch(ctx context.Context, fn <font color=blue>func</font>(*Tx) error, keys ...string) error
+        + Do(ctx context.Context, args ...<font color=blue>interface</font>{}) *Cmd
+        + Process(ctx context.Context, cmd Cmder) error
+        + Subscribe(ctx context.Context, channels ...string) *PubSub
+        + PSubscribe(ctx context.Context, channels ...string) *PubSub
+        + Close() error
+        + PoolStats() *PoolStats
+
+    }
+    class UniversalOptions << (S,Aquamarine) >> {
+        + Addrs []string
+        + DB int
+        + Dialer <font color=blue>func</font>(context.Context, string, string) (net.Conn, error)
+        + OnConnect <font color=blue>func</font>(context.Context, *Conn) error
+        + Username string
+        + Password string
+        + SentinelUsername string
+        + SentinelPassword string
+        + MaxRetries int
+        + MinRetryBackoff time.Duration
+        + MaxRetryBackoff time.Duration
+        + DialTimeout time.Duration
+        + ReadTimeout time.Duration
+        + WriteTimeout time.Duration
+        + PoolFIFO bool
+        + PoolSize int
+        + MinIdleConns int
+        + MaxConnAge time.Duration
+        + PoolTimeout time.Duration
+        + IdleTimeout time.Duration
+        + IdleCheckFrequency time.Duration
+        + TLSConfig *tls.Config
+        + MaxRedirects int
+        + ReadOnly bool
+        + RouteByLatency bool
+        + RouteRandomly bool
+        + MasterName string
+
+        + Cluster() *ClusterOptions
+        + Failover() *FailoverOptions
+        + Simple() *Options
+
+    }
+    class XAddArgs << (S,Aquamarine) >> {
+        + Stream string
+        + NoMkStream bool
+        + MaxLen int64
+        + MaxLenApprox int64
+        + MinID string
+        + Approx bool
+        + Limit int64
+        + ID string
+        + Values <font color=blue>interface</font>{}
+
+    }
+    class XAutoClaimArgs << (S,Aquamarine) >> {
+        + Stream string
+        + Group string
+        + MinIdle time.Duration
+        + Start string
+        + Count int64
+        + Consumer string
+
+    }
+    class XAutoClaimCmd << (S,Aquamarine) >> {
+        - start string
+        - val []XMessage
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []XMessage, start string) 
+        + Val() ([]XMessage, string)
+        + Result() ([]XMessage, string, error)
+        + String() string
+
+    }
+    class XAutoClaimJustIDCmd << (S,Aquamarine) >> {
+        - start string
+        - val []string
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []string, start string) 
+        + Val() ([]string, string)
+        + Result() ([]string, string, error)
+        + String() string
+
+    }
+    class XClaimArgs << (S,Aquamarine) >> {
+        + Stream string
+        + Group string
+        + Consumer string
+        + MinIdle time.Duration
+        + Messages []string
+
+    }
+    class XInfoConsumer << (S,Aquamarine) >> {
+        + Name string
+        + Pending int64
+        + Idle int64
+
+    }
+    class XInfoConsumersCmd << (S,Aquamarine) >> {
+        - val []XInfoConsumer
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []XInfoConsumer) 
+        + Val() []XInfoConsumer
+        + Result() ([]XInfoConsumer, error)
+        + String() string
+
+    }
+    class XInfoGroup << (S,Aquamarine) >> {
+        + Name string
+        + Consumers int64
+        + Pending int64
+        + LastDeliveredID string
+
+    }
+    class XInfoGroupsCmd << (S,Aquamarine) >> {
+        - val []XInfoGroup
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []XInfoGroup) 
+        + Val() []XInfoGroup
+        + Result() ([]XInfoGroup, error)
+        + String() string
+
+    }
+    class XInfoStream << (S,Aquamarine) >> {
+        + Length int64
+        + RadixTreeKeys int64
+        + RadixTreeNodes int64
+        + Groups int64
+        + LastGeneratedID string
+        + FirstEntry XMessage
+        + LastEntry XMessage
+
+    }
+    class XInfoStreamCmd << (S,Aquamarine) >> {
+        - val *XInfoStream
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val *XInfoStream) 
+        + Val() *XInfoStream
+        + Result() (*XInfoStream, error)
+        + String() string
+
+    }
+    class XInfoStreamConsumer << (S,Aquamarine) >> {
+        + Name string
+        + SeenTime time.Time
+        + PelCount int64
+        + Pending []XInfoStreamConsumerPending
+
+    }
+    class XInfoStreamConsumerPending << (S,Aquamarine) >> {
+        + ID string
+        + DeliveryTime time.Time
+        + DeliveryCount int64
+
+    }
+    class XInfoStreamFull << (S,Aquamarine) >> {
+        + Length int64
+        + RadixTreeKeys int64
+        + RadixTreeNodes int64
+        + LastGeneratedID string
+        + Entries []XMessage
+        + Groups []XInfoStreamGroup
+
+    }
+    class XInfoStreamFullCmd << (S,Aquamarine) >> {
+        - val *XInfoStreamFull
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val *XInfoStreamFull) 
+        + Val() *XInfoStreamFull
+        + Result() (*XInfoStreamFull, error)
+        + String() string
+
+    }
+    class XInfoStreamGroup << (S,Aquamarine) >> {
+        + Name string
+        + LastDeliveredID string
+        + PelCount int64
+        + Pending []XInfoStreamGroupPending
+        + Consumers []XInfoStreamConsumer
+
+    }
+    class XInfoStreamGroupPending << (S,Aquamarine) >> {
+        + ID string
+        + Consumer string
+        + DeliveryTime time.Time
+        + DeliveryCount int64
+
+    }
+    class XMessage << (S,Aquamarine) >> {
+        + ID string
+        + Values <font color=blue>map</font>[string]<font color=blue>interface</font>{}
+
+    }
+    class XMessageSliceCmd << (S,Aquamarine) >> {
+        - val []XMessage
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []XMessage) 
+        + Val() []XMessage
+        + Result() ([]XMessage, error)
+        + String() string
+
+    }
+    class XPending << (S,Aquamarine) >> {
+        + Count int64
+        + Lower string
+        + Higher string
+        + Consumers <font color=blue>map</font>[string]int64
+
+    }
+    class XPendingCmd << (S,Aquamarine) >> {
+        - val *XPending
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val *XPending) 
+        + Val() *XPending
+        + Result() (*XPending, error)
+        + String() string
+
+    }
+    class XPendingExt << (S,Aquamarine) >> {
+        + ID string
+        + Consumer string
+        + Idle time.Duration
+        + RetryCount int64
+
+    }
+    class XPendingExtArgs << (S,Aquamarine) >> {
+        + Stream string
+        + Group string
+        + Idle time.Duration
+        + Start string
+        + End string
+        + Count int64
+        + Consumer string
+
+    }
+    class XPendingExtCmd << (S,Aquamarine) >> {
+        - val []XPendingExt
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []XPendingExt) 
+        + Val() []XPendingExt
+        + Result() ([]XPendingExt, error)
+        + String() string
+
+    }
+    class XReadArgs << (S,Aquamarine) >> {
+        + Streams []string
+        + Count int64
+        + Block time.Duration
+
+    }
+    class XReadGroupArgs << (S,Aquamarine) >> {
+        + Group string
+        + Consumer string
+        + Streams []string
+        + Count int64
+        + Block time.Duration
+        + NoAck bool
+
+    }
+    class XStream << (S,Aquamarine) >> {
+        + Stream string
+        + Messages []XMessage
+
+    }
+    class XStreamSliceCmd << (S,Aquamarine) >> {
+        - val []XStream
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []XStream) 
+        + Val() []XStream
+        + Result() ([]XStream, error)
+        + String() string
+
+    }
+    class Z << (S,Aquamarine) >> {
+        + Score float64
+        + Member <font color=blue>interface</font>{}
+
+    }
+    class ZAddArgs << (S,Aquamarine) >> {
+        + NX bool
+        + XX bool
+        + LT bool
+        + GT bool
+        + Ch bool
+        + Members []Z
+
+    }
+    class ZRangeArgs << (S,Aquamarine) >> {
+        + Key string
+        + Start <font color=blue>interface</font>{}
+        + Stop <font color=blue>interface</font>{}
+        + ByScore bool
+        + ByLex bool
+        + Rev bool
+        + Offset int64
+        + Count int64
+
+        - appendArgs(args []<font color=blue>interface</font>{}) []<font color=blue>interface</font>{}
+
+    }
+    class ZRangeBy << (S,Aquamarine) >> {
+        + Min string
+        + Offset int64
+
+    }
+    class ZSliceCmd << (S,Aquamarine) >> {
+        - val []Z
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val []Z) 
+        + Val() []Z
+        + Result() ([]Z, error)
+        + String() string
+
+    }
+    class ZStore << (S,Aquamarine) >> {
+        + Keys []string
+        + Weights []float64
+        + Aggregate string
+
+        - len() int
+        - appendArgs(args []<font color=blue>interface</font>{}) []<font color=blue>interface</font>{}
+
+    }
+    class ZWithKey << (S,Aquamarine) >> {
+        + Key string
+
+    }
+    class ZWithKeyCmd << (S,Aquamarine) >> {
+        - val *ZWithKey
+
+        - readReply(rd *proto.Reader) error
+
+        + SetVal(val *ZWithKey) 
+        + Val() *ZWithKey
+        + Result() (*ZWithKey, error)
+        + String() string
+
+    }
+    class baseClient << (S,Aquamarine) >> {
+        - opt *Options
+        - connPool pool.Pooler
+        - onClose <font color=blue>func</font>() error
+
+        - clone() *baseClient
+        - withTimeout(timeout time.Duration) *baseClient
+        - newConn(ctx context.Context) (*pool.Conn, error)
+        - getConn(ctx context.Context) (*pool.Conn, error)
+        - initConn(ctx context.Context, cn *pool.Conn) error
+        - releaseConn(ctx context.Context, cn *pool.Conn, err error) 
+        - withConn(ctx context.Context, fn <font color=blue>func</font>(context.Context, *pool.Conn) error) error
+        - process(ctx context.Context, cmd Cmder) error
+        - retryBackoff(attempt int) time.Duration
+        - cmdTimeout(cmd Cmder) time.Duration
+        - getAddr() string
+        - processPipeline(ctx context.Context, cmds []Cmder) error
+        - processTxPipeline(ctx context.Context, cmds []Cmder) error
+        - generalProcessPipeline(ctx context.Context, cmds []Cmder, p pipelineProcessor) error
+        - pipelineProcessCmds(ctx context.Context, cn *pool.Conn, cmds []Cmder) (bool, error)
+        - txPipelineProcessCmds(ctx context.Context, cn *pool.Conn, cmds []Cmder) (bool, error)
+
+        + String() string
+        + _getConn(ctx context.Context) (*pool.Conn, error)
+        + _process(ctx context.Context, cmd Cmder, attempt int) (bool, error)
+        + Close() error
+        + _generalProcessPipeline(ctx context.Context, cmds []Cmder, p pipelineProcessor) error
+
+    }
+    class baseCmd << (S,Aquamarine) >> {
+        - ctx context.Context
+        - args []<font color=blue>interface</font>{}
+        - err error
+        - keyPos int8
+
+        + _readTimeout *time.Duration
+
+        - stringArg(pos int) string
+        - firstKeyPos() int8
+        - readTimeout() *time.Duration
+        - setReadTimeout(d time.Duration) 
+
+        + Name() string
+        + FullName() string
+        + Args() []<font color=blue>interface</font>{}
+        + SetFirstKeyPos(keyPos int8) 
+        + SetErr(e error) 
+        + Err() error
+
+    }
+    class channel << (S,Aquamarine) >> {
+        - pubSub *PubSub
+        - msgCh <font color=blue>chan</font> *Message
+        - allCh <font color=blue>chan</font> <font color=blue>interface</font>{}
+        - ping <font color=blue>chan</font> <font color=blue>struct</font>{}
+        - chanSize int
+        - chanSendTimeout time.Duration
+        - checkInterval time.Duration
+
+        - initHealthCheck() 
+        - initMsgChan() 
+        - initAllChan() 
+
+    }
+    class clusterClient << (S,Aquamarine) >> {
+        - opt *ClusterOptions
+        - nodes *clusterNodes
+        - state *clusterStateHolder
+        - cmdsInfoCache *cmdsInfoCache
+
+        - slotReadOnlyNode(state *clusterState, slot int) (*clusterNode, error)
+
+    }
+    class clusterNode << (S,Aquamarine) >> {
+        - latency uint32
+        - generation uint32
+        - failing uint32
+
+        + Client *Client
+
+        - updateLatency() 
+
+        + String() string
+        + Close() error
+        + Latency() time.Duration
+        + MarkAsFailing() 
+        + Failing() bool
+        + Generation() uint32
+        + SetGeneration(gen uint32) 
+
+    }
+    class clusterNodes << (S,Aquamarine) >> {
+        - opt *ClusterOptions
+        - mu sync.RWMutex
+        - addrs []string
+        - nodes <font color=blue>map</font>[string]*clusterNode
+        - activeAddrs []string
+        - closed bool
+
+        + _generation uint32
+
+        - get(addr string) (*clusterNode, error)
+
+        + Close() error
+        + Addrs() ([]string, error)
+        + NextGeneration() uint32
+        + GC(generation uint32) 
+        + GetOrCreate(addr string) (*clusterNode, error)
+        + All() ([]*clusterNode, error)
+        + Random() (*clusterNode, error)
+
+    }
+    class clusterSlot << (S,Aquamarine) >> {
+        - start int
+        - nodes []*clusterNode
+
+    }
+    class clusterSlotSlice << (S,Aquamarine) >> {
+        + Len() int
+        + Less(i int, j int) bool
+        + Swap(i int, j int) 
+
+    }
+    class clusterState << (S,Aquamarine) >> {
+        - nodes *clusterNodes
+        - slots []*clusterSlot
+        - generation uint32
+        - createdAt time.Time
+
+        + Masters []*clusterNode
+        + Slaves []*clusterNode
+
+        - slotMasterNode(slot int) (*clusterNode, error)
+        - slotSlaveNode(slot int) (*clusterNode, error)
+        - slotClosestNode(slot int) (*clusterNode, error)
+        - slotRandomNode(slot int) (*clusterNode, error)
+        - slotNodes(slot int) []*clusterNode
+
+    }
+    class clusterStateHolder << (S,Aquamarine) >> {
+        - load <font color=blue>func</font>(context.Context) (*clusterState, error)
+        - state atomic.Value
+        - reloading uint32
+
+        + Reload(ctx context.Context) (*clusterState, error)
+        + LazyReload() 
+        + Get(ctx context.Context) (*clusterState, error)
+        + ReloadOrGet(ctx context.Context) (*clusterState, error)
+
+    }
+    class cmdable << (S,Aquamarine) >> {
+        - expire(ctx context.Context, key string, expiration time.Duration, mode string) *BoolCmd
+        - bitOp(ctx context.Context, op string, destKey string, keys ...string) *IntCmd
+        - xTrim(ctx context.Context, key string, strategy string, approx bool, threshold <font color=blue>interface</font>{}, limit int64) *IntCmd
+        - zAddArgs(key string, args ZAddArgs, incr bool) []<font color=blue>interface</font>{}
+        - zAdd(ctx context.Context, key string, args ZAddArgs, members ...*Z) *IntCmd
+        - zRangeBy(ctx context.Context, zcmd string, key string, opt *ZRangeBy, withScores bool) *StringSliceCmd
+        - zRevRangeBy(ctx context.Context, zcmd string, key string, opt *ZRangeBy) *StringSliceCmd
+        - shutdown(ctx context.Context, modifier string) *StatusCmd
+
+        + Wait(ctx context.Context, numSlaves int, timeout time.Duration) *IntCmd
+        + Command(ctx context.Context) *CommandsInfoCmd
+        + ClientGetName(ctx context.Context) *StringCmd
+        + Echo(ctx context.Context, message <font color=blue>interface</font>{}) *StringCmd
+        + Ping(ctx context.Context) *StatusCmd
+        + Quit(_ context.Context) *StatusCmd
+        + Del(ctx context.Context, keys ...string) *IntCmd
+        + Unlink(ctx context.Context, keys ...string) *IntCmd
+        + Dump(ctx context.Context, key string) *StringCmd
+        + Exists(ctx context.Context, keys ...string) *IntCmd
+        + Expire(ctx context.Context, key string, expiration time.Duration) *BoolCmd
+        + ExpireAt(ctx context.Context, key string, tm time.Time) *BoolCmd
+        + Keys(ctx context.Context, pattern string) *StringSliceCmd
+        + Migrate(ctx context.Context, host string, port string, key string, db int, timeout time.Duration) *StatusCmd
+        + Move(ctx context.Context, key string, db int) *BoolCmd
+        + ObjectRefCount(ctx context.Context, key string) *IntCmd
+        + ObjectEncoding(ctx context.Context, key string) *StringCmd
+        + ObjectIdleTime(ctx context.Context, key string) *DurationCmd
+        + Persist(ctx context.Context, key string) *BoolCmd
+        + PExpire(ctx context.Context, key string, expiration time.Duration) *BoolCmd
+        + PExpireAt(ctx context.Context, key string, tm time.Time) *BoolCmd
+        + PTTL(ctx context.Context, key string) *DurationCmd
+        + RandomKey(ctx context.Context) *StringCmd
+        + Rename(ctx context.Context, key string, newkey string) *StatusCmd
+        + RenameNX(ctx context.Context, key string, newkey string) *BoolCmd
+        + Restore(ctx context.Context, key string, ttl time.Duration, value string) *StatusCmd
+        + RestoreReplace(ctx context.Context, key string, ttl time.Duration, value string) *StatusCmd
+        + Sort(ctx context.Context, key string, sort *Sort) *StringSliceCmd
+        + SortStore(ctx context.Context, key string, store string, sort *Sort) *IntCmd
+        + SortInterfaces(ctx context.Context, key string, sort *Sort) *SliceCmd
+        + Touch(ctx context.Context, keys ...string) *IntCmd
+        + TTL(ctx context.Context, key string) *DurationCmd
+        + Type(ctx context.Context, key string) *StatusCmd
+        + Append(ctx context.Context, key string, value string) *IntCmd
+        + Decr(ctx context.Context, key string) *IntCmd
+        + DecrBy(ctx context.Context, key string, decrement int64) *IntCmd
+        + Get(ctx context.Context, key string) *StringCmd
+        + GetRange(ctx context.Context, key string, start int64, end int64) *StringCmd
+        + GetSet(ctx context.Context, key string, value <font color=blue>interface</font>{}) *StringCmd
+        + GetEx(ctx context.Context, key string, expiration time.Duration) *StringCmd
+        + GetDel(ctx context.Context, key string) *StringCmd
+        + Incr(ctx context.Context, key string) *IntCmd
+        + IncrBy(ctx context.Context, key string, value int64) *IntCmd
+        + IncrByFloat(ctx context.Context, key string, value float64) *FloatCmd
+        + MGet(ctx context.Context, keys ...string) *SliceCmd
+        + MSet(ctx context.Context, values ...<font color=blue>interface</font>{}) *StatusCmd
+        + MSetNX(ctx context.Context, values ...<font color=blue>interface</font>{}) *BoolCmd
+        + Set(ctx context.Context, key string, value <font color=blue>interface</font>{}, expiration time.Duration) *StatusCmd
+        + SetArgs(ctx context.Context, key string, value <font color=blue>interface</font>{}, a SetArgs) *StatusCmd
+        + SetEX(ctx context.Context, key string, value <font color=blue>interface</font>{}, expiration time.Duration) *StatusCmd
+        + SetNX(ctx context.Context, key string, value <font color=blue>interface</font>{}, expiration time.Duration) *BoolCmd
+        + SetXX(ctx context.Context, key string, value <font color=blue>interface</font>{}, expiration time.Duration) *BoolCmd
+        + SetRange(ctx context.Context, key string, offset int64, value string) *IntCmd
+        + StrLen(ctx context.Context, key string) *IntCmd
+        + Copy(ctx context.Context, sourceKey string, destKey string, db int, replace bool) *IntCmd
+        + GetBit(ctx context.Context, key string, offset int64) *IntCmd
+        + SetBit(ctx context.Context, key string, offset int64, value int) *IntCmd
+        + BitCount(ctx context.Context, key string, bitCount *BitCount) *IntCmd
+        + BitOpAnd(ctx context.Context, destKey string, keys ...string) *IntCmd
+        + BitOpOr(ctx context.Context, destKey string, keys ...string) *IntCmd
+        + BitOpXor(ctx context.Context, destKey string, keys ...string) *IntCmd
+        + BitOpNot(ctx context.Context, destKey string, key string) *IntCmd
+        + BitPos(ctx context.Context, key string, bit int64, pos ...int64) *IntCmd
+        + BitField(ctx context.Context, key string, args ...<font color=blue>interface</font>{}) *IntSliceCmd
+        + Scan(ctx context.Context, cursor uint64, match string, count int64) *ScanCmd
+        + ScanType(ctx context.Context, cursor uint64, match string, count int64, keyType string) *ScanCmd
+        + SScan(ctx context.Context, key string, cursor uint64, match string, count int64) *ScanCmd
+        + HScan(ctx context.Context, key string, cursor uint64, match string, count int64) *ScanCmd
+        + ZScan(ctx context.Context, key string, cursor uint64, match string, count int64) *ScanCmd
+        + HDel(ctx context.Context, key string, fields ...string) *IntCmd
+        + HExists(ctx context.Context, key string, field string) *BoolCmd
+        + HGet(ctx context.Context, key string, field string) *StringCmd
+        + HGetAll(ctx context.Context, key string) *StringStringMapCmd
+        + HIncrBy(ctx context.Context, key string, field string, incr int64) *IntCmd
+        + HIncrByFloat(ctx context.Context, key string, field string, incr float64) *FloatCmd
+        + HKeys(ctx context.Context, key string) *StringSliceCmd
+        + HLen(ctx context.Context, key string) *IntCmd
+        + HMGet(ctx context.Context, key string, fields ...string) *SliceCmd
+        + HSet(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + HMSet(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *BoolCmd
+        + HSetNX(ctx context.Context, key string, field string, value <font color=blue>interface</font>{}) *BoolCmd
+        + HVals(ctx context.Context, key string) *StringSliceCmd
+        + HRandField(ctx context.Context, key string, count int, withValues bool) *StringSliceCmd
+        + BLPop(ctx context.Context, timeout time.Duration, keys ...string) *StringSliceCmd
+        + BRPop(ctx context.Context, timeout time.Duration, keys ...string) *StringSliceCmd
+        + BRPopLPush(ctx context.Context, source string, destination string, timeout time.Duration) *StringCmd
+        + LIndex(ctx context.Context, key string, index int64) *StringCmd
+        + LInsert(ctx context.Context, key string, op string, pivot <font color=blue>interface</font>{}, value <font color=blue>interface</font>{}) *IntCmd
+        + LInsertBefore(ctx context.Context, key string, pivot <font color=blue>interface</font>{}, value <font color=blue>interface</font>{}) *IntCmd
+        + LInsertAfter(ctx context.Context, key string, pivot <font color=blue>interface</font>{}, value <font color=blue>interface</font>{}) *IntCmd
+        + LLen(ctx context.Context, key string) *IntCmd
+        + LPop(ctx context.Context, key string) *StringCmd
+        + LPopCount(ctx context.Context, key string, count int) *StringSliceCmd
+        + LPos(ctx context.Context, key string, value string, a LPosArgs) *IntCmd
+        + LPosCount(ctx context.Context, key string, value string, count int64, a LPosArgs) *IntSliceCmd
+        + LPush(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + LPushX(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + LRange(ctx context.Context, key string, start int64, stop int64) *StringSliceCmd
+        + LRem(ctx context.Context, key string, count int64, value <font color=blue>interface</font>{}) *IntCmd
+        + LSet(ctx context.Context, key string, index int64, value <font color=blue>interface</font>{}) *StatusCmd
+        + LTrim(ctx context.Context, key string, start int64, stop int64) *StatusCmd
+        + RPop(ctx context.Context, key string) *StringCmd
+        + RPopCount(ctx context.Context, key string, count int) *StringSliceCmd
+        + RPopLPush(ctx context.Context, source string, destination string) *StringCmd
+        + RPush(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + RPushX(ctx context.Context, key string, values ...<font color=blue>interface</font>{}) *IntCmd
+        + LMove(ctx context.Context, source string, destination string, srcpos string, destpos string) *StringCmd
+        + BLMove(ctx context.Context, source string, destination string, srcpos string, destpos string, timeout time.Duration) *StringCmd
+        + SAdd(ctx context.Context, key string, members ...<font color=blue>interface</font>{}) *IntCmd
+        + SCard(ctx context.Context, key string) *IntCmd
+        + SDiff(ctx context.Context, keys ...string) *StringSliceCmd
+        + SDiffStore(ctx context.Context, destination string, keys ...string) *IntCmd
+        + SInter(ctx context.Context, keys ...string) *StringSliceCmd
+        + SInterStore(ctx context.Context, destination string, keys ...string) *IntCmd
+        + SIsMember(ctx context.Context, key string, member <font color=blue>interface</font>{}) *BoolCmd
+        + SMIsMember(ctx context.Context, key string, members ...<font color=blue>interface</font>{}) *BoolSliceCmd
+        + SMembers(ctx context.Context, key string) *StringSliceCmd
+        + SMembersMap(ctx context.Context, key string) *StringStructMapCmd
+        + SMove(ctx context.Context, source string, destination string, member <font color=blue>interface</font>{}) *BoolCmd
+        + SPop(ctx context.Context, key string) *StringCmd
+        + SPopN(ctx context.Context, key string, count int64) *StringSliceCmd
+        + SRandMember(ctx context.Context, key string) *StringCmd
+        + SRandMemberN(ctx context.Context, key string, count int64) *StringSliceCmd
+        + SRem(ctx context.Context, key string, members ...<font color=blue>interface</font>{}) *IntCmd
+        + SUnion(ctx context.Context, keys ...string) *StringSliceCmd
+        + SUnionStore(ctx context.Context, destination string, keys ...string) *IntCmd
+        + XAdd(ctx context.Context, a *XAddArgs) *StringCmd
+        + XDel(ctx context.Context, stream string, ids ...string) *IntCmd
+        + XLen(ctx context.Context, stream string) *IntCmd
+        + XRange(ctx context.Context, stream string, start string, stop string) *XMessageSliceCmd
+        + XRangeN(ctx context.Context, stream string, start string, stop string, count int64) *XMessageSliceCmd
+        + XRevRange(ctx context.Context, stream string, start string, stop string) *XMessageSliceCmd
+        + XRevRangeN(ctx context.Context, stream string, start string, stop string, count int64) *XMessageSliceCmd
+        + XRead(ctx context.Context, a *XReadArgs) *XStreamSliceCmd
+        + XReadStreams(ctx context.Context, streams ...string) *XStreamSliceCmd
+        + XGroupCreate(ctx context.Context, stream string, group string, start string) *StatusCmd
+        + XGroupCreateMkStream(ctx context.Context, stream string, group string, start string) *StatusCmd
+        + XGroupSetID(ctx context.Context, stream string, group string, start string) *StatusCmd
+        + XGroupDestroy(ctx context.Context, stream string, group string) *IntCmd
+        + XGroupCreateConsumer(ctx context.Context, stream string, group string, consumer string) *IntCmd
+        + XGroupDelConsumer(ctx context.Context, stream string, group string, consumer string) *IntCmd
+        + XReadGroup(ctx context.Context, a *XReadGroupArgs) *XStreamSliceCmd
+        + XAck(ctx context.Context, stream string, group string, ids ...string) *IntCmd
+        + XPending(ctx context.Context, stream string, group string) *XPendingCmd
+        + XPendingExt(ctx context.Context, a *XPendingExtArgs) *XPendingExtCmd
+        + XAutoClaim(ctx context.Context, a *XAutoClaimArgs) *XAutoClaimCmd
+        + XAutoClaimJustID(ctx context.Context, a *XAutoClaimArgs) *XAutoClaimJustIDCmd
+        + XClaim(ctx context.Context, a *XClaimArgs) *XMessageSliceCmd
+        + XClaimJustID(ctx context.Context, a *XClaimArgs) *StringSliceCmd
+        + XTrim(ctx context.Context, key string, maxLen int64) *IntCmd
+        + XTrimApprox(ctx context.Context, key string, maxLen int64) *IntCmd
+        + XTrimMaxLen(ctx context.Context, key string, maxLen int64) *IntCmd
+        + XTrimMaxLenApprox(ctx context.Context, key string, maxLen int64, limit int64) *IntCmd
+        + XTrimMinID(ctx context.Context, key string, minID string) *IntCmd
+        + XTrimMinIDApprox(ctx context.Context, key string, minID string, limit int64) *IntCmd
+        + XInfoConsumers(ctx context.Context, key string, group string) *XInfoConsumersCmd
+        + XInfoGroups(ctx context.Context, key string) *XInfoGroupsCmd
+        + XInfoStream(ctx context.Context, key string) *XInfoStreamCmd
+        + XInfoStreamFull(ctx context.Context, key string, count int) *XInfoStreamFullCmd
+        + BZPopMax(ctx context.Context, timeout time.Duration, keys ...string) *ZWithKeyCmd
+        + BZPopMin(ctx context.Context, timeout time.Duration, keys ...string) *ZWithKeyCmd
+        + ZAddArgs(ctx context.Context, key string, args ZAddArgs) *IntCmd
+        + ZAddArgsIncr(ctx context.Context, key string, args ZAddArgs) *FloatCmd
+        + ZAdd(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddNX(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddXX(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddCh(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddNXCh(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZAddXXCh(ctx context.Context, key string, members ...*Z) *IntCmd
+        + ZIncr(ctx context.Context, key string, member *Z) *FloatCmd
+        + ZIncrNX(ctx context.Context, key string, member *Z) *FloatCmd
+        + ZIncrXX(ctx context.Context, key string, member *Z) *FloatCmd
+        + ZCard(ctx context.Context, key string) *IntCmd
+        + ZCount(ctx context.Context, key string, min string, max string) *IntCmd
+        + ZLexCount(ctx context.Context, key string, min string, max string) *IntCmd
+        + ZIncrBy(ctx context.Context, key string, increment float64, member string) *FloatCmd
+        + ZInterStore(ctx context.Context, destination string, store *ZStore) *IntCmd
+        + ZInter(ctx context.Context, store *ZStore) *StringSliceCmd
+        + ZInterWithScores(ctx context.Context, store *ZStore) *ZSliceCmd
+        + ZMScore(ctx context.Context, key string, members ...string) *FloatSliceCmd
+        + ZPopMax(ctx context.Context, key string, count ...int64) *ZSliceCmd
+        + ZPopMin(ctx context.Context, key string, count ...int64) *ZSliceCmd
+        + ZRangeArgs(ctx context.Context, z ZRangeArgs) *StringSliceCmd
+        + ZRangeArgsWithScores(ctx context.Context, z ZRangeArgs) *ZSliceCmd
+        + ZRange(ctx context.Context, key string, start int64, stop int64) *StringSliceCmd
+        + ZRangeWithScores(ctx context.Context, key string, start int64, stop int64) *ZSliceCmd
+        + ZRangeByScore(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd
+        + ZRangeByLex(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd
+        + ZRangeByScoreWithScores(ctx context.Context, key string, opt *ZRangeBy) *ZSliceCmd
+        + ZRangeStore(ctx context.Context, dst string, z ZRangeArgs) *IntCmd
+        + ZRank(ctx context.Context, key string, member string) *IntCmd
+        + ZRem(ctx context.Context, key string, members ...<font color=blue>interface</font>{}) *IntCmd
+        + ZRemRangeByRank(ctx context.Context, key string, start int64, stop int64) *IntCmd
+        + ZRemRangeByScore(ctx context.Context, key string, min string, max string) *IntCmd
+        + ZRemRangeByLex(ctx context.Context, key string, min string, max string) *IntCmd
+        + ZRevRange(ctx context.Context, key string, start int64, stop int64) *StringSliceCmd
+        + ZRevRangeWithScores(ctx context.Context, key string, start int64, stop int64) *ZSliceCmd
+        + ZRevRangeByScore(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd
+        + ZRevRangeByLex(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd
+        + ZRevRangeByScoreWithScores(ctx context.Context, key string, opt *ZRangeBy) *ZSliceCmd
+        + ZRevRank(ctx context.Context, key string, member string) *IntCmd
+        + ZScore(ctx context.Context, key string, member string) *FloatCmd
+        + ZUnion(ctx context.Context, store ZStore) *StringSliceCmd
+        + ZUnionWithScores(ctx context.Context, store ZStore) *ZSliceCmd
+        + ZUnionStore(ctx context.Context, dest string, store *ZStore) *IntCmd
+        + ZRandMember(ctx context.Context, key string, count int, withScores bool) *StringSliceCmd
+        + ZDiff(ctx context.Context, keys ...string) *StringSliceCmd
+        + ZDiffWithScores(ctx context.Context, keys ...string) *ZSliceCmd
+        + ZDiffStore(ctx context.Context, destination string, keys ...string) *IntCmd
+        + PFAdd(ctx context.Context, key string, els ...<font color=blue>interface</font>{}) *IntCmd
+        + PFCount(ctx context.Context, keys ...string) *IntCmd
+        + PFMerge(ctx context.Context, dest string, keys ...string) *StatusCmd
+        + BgRewriteAOF(ctx context.Context) *StatusCmd
+        + BgSave(ctx context.Context) *StatusCmd
+        + ClientKill(ctx context.Context, ipPort string) *StatusCmd
+        + ClientKillByFilter(ctx context.Context, keys ...string) *IntCmd
+        + ClientList(ctx context.Context) *StringCmd
+        + ClientPause(ctx context.Context, dur time.Duration) *BoolCmd
+        + ClientID(ctx context.Context) *IntCmd
+        + ClientUnblock(ctx context.Context, id int64) *IntCmd
+        + ClientUnblockWithError(ctx context.Context, id int64) *IntCmd
+        + ConfigGet(ctx context.Context, parameter string) *SliceCmd
+        + ConfigResetStat(ctx context.Context) *StatusCmd
+        + ConfigSet(ctx context.Context, parameter string, value string) *StatusCmd
+        + ConfigRewrite(ctx context.Context) *StatusCmd
+        + DBSize(ctx context.Context) *IntCmd
+        + FlushAll(ctx context.Context) *StatusCmd
+        + FlushAllAsync(ctx context.Context) *StatusCmd
+        + FlushDB(ctx context.Context) *StatusCmd
+        + FlushDBAsync(ctx context.Context) *StatusCmd
+        + Info(ctx context.Context, section ...string) *StringCmd
+        + LastSave(ctx context.Context) *IntCmd
+        + Save(ctx context.Context) *StatusCmd
+        + Shutdown(ctx context.Context) *StatusCmd
+        + ShutdownSave(ctx context.Context) *StatusCmd
+        + ShutdownNoSave(ctx context.Context) *StatusCmd
+        + SlaveOf(ctx context.Context, host string, port string) *StatusCmd
+        + SlowLogGet(ctx context.Context, num int64) *SlowLogCmd
+        + Sync(_ context.Context) 
+        + Time(ctx context.Context) *TimeCmd
+        + DebugObject(ctx context.Context, key string) *StringCmd
+        + ReadOnly(ctx context.Context) *StatusCmd
+        + ReadWrite(ctx context.Context) *StatusCmd
+        + MemoryUsage(ctx context.Context, key string, samples ...int) *IntCmd
+        + Eval(ctx context.Context, script string, keys []string, args ...<font color=blue>interface</font>{}) *Cmd
+        + EvalSha(ctx context.Context, sha1 string, keys []string, args ...<font color=blue>interface</font>{}) *Cmd
+        + ScriptExists(ctx context.Context, hashes ...string) *BoolSliceCmd
+        + ScriptFlush(ctx context.Context) *StatusCmd
+        + ScriptKill(ctx context.Context) *StatusCmd
+        + ScriptLoad(ctx context.Context, script string) *StringCmd
+        + Publish(ctx context.Context, channel string, message <font color=blue>interface</font>{}) *IntCmd
+        + PubSubChannels(ctx context.Context, pattern string) *StringSliceCmd
+        + PubSubNumSub(ctx context.Context, channels ...string) *StringIntMapCmd
+        + PubSubNumPat(ctx context.Context) *IntCmd
+        + ClusterSlots(ctx context.Context) *ClusterSlotsCmd
+        + ClusterNodes(ctx context.Context) *StringCmd
+        + ClusterMeet(ctx context.Context, host string, port string) *StatusCmd
+        + ClusterForget(ctx context.Context, nodeID string) *StatusCmd
+        + ClusterReplicate(ctx context.Context, nodeID string) *StatusCmd
+        + ClusterResetSoft(ctx context.Context) *StatusCmd
+        + ClusterResetHard(ctx context.Context) *StatusCmd
+        + ClusterInfo(ctx context.Context) *StringCmd
+        + ClusterKeySlot(ctx context.Context, key string) *IntCmd
+        + ClusterGetKeysInSlot(ctx context.Context, slot int, count int) *StringSliceCmd
+        + ClusterCountFailureReports(ctx context.Context, nodeID string) *IntCmd
+        + ClusterCountKeysInSlot(ctx context.Context, slot int) *IntCmd
+        + ClusterDelSlots(ctx context.Context, slots ...int) *StatusCmd
+        + ClusterDelSlotsRange(ctx context.Context, min int, max int) *StatusCmd
+        + ClusterSaveConfig(ctx context.Context) *StatusCmd
+        + ClusterSlaves(ctx context.Context, nodeID string) *StringSliceCmd
+        + ClusterFailover(ctx context.Context) *StatusCmd
+        + ClusterAddSlots(ctx context.Context, slots ...int) *StatusCmd
+        + ClusterAddSlotsRange(ctx context.Context, min int, max int) *StatusCmd
+        + GeoAdd(ctx context.Context, key string, geoLocation ...*GeoLocation) *IntCmd
+        + GeoRadius(ctx context.Context, key string, longitude float64, latitude float64, query *GeoRadiusQuery) *GeoLocationCmd
+        + GeoRadiusStore(ctx context.Context, key string, longitude float64, latitude float64, query *GeoRadiusQuery) *IntCmd
+        + GeoRadiusByMember(ctx context.Context, key string, member string, query *GeoRadiusQuery) *GeoLocationCmd
+        + GeoRadiusByMemberStore(ctx context.Context, key string, member string, query *GeoRadiusQuery) *IntCmd
+        + GeoSearch(ctx context.Context, key string, q *GeoSearchQuery) *StringSliceCmd
+        + GeoSearchLocation(ctx context.Context, key string, q *GeoSearchLocationQuery) *GeoSearchLocationCmd
+        + GeoSearchStore(ctx context.Context, key string, store string, q *GeoSearchStoreQuery) *IntCmd
+        + GeoDist(ctx context.Context, key string, member1 string, member2 string, unit string) *FloatCmd
+        + GeoHash(ctx context.Context, key string, members ...string) *StringSliceCmd
+        + GeoPos(ctx context.Context, key string, members ...string) *GeoPosCmd
+
+    }
+    class cmdsInfoCache << (S,Aquamarine) >> {
+        - fn <font color=blue>func</font>(context.Context) (<font color=blue>map</font>[string]*CommandInfo, error)
+        - once internal.Once
+        - cmds <font color=blue>map</font>[string]*CommandInfo
+
+        + Get(ctx context.Context) (<font color=blue>map</font>[string]*CommandInfo, error)
+
+    }
+    class cmdsMap << (S,Aquamarine) >> {
+        - mu sync.Mutex
+        - m <font color=blue>map</font>[*clusterNode][]Cmder
+
+        + Add(node *clusterNode, cmds ...Cmder) 
+
+    }
+    class conn << (S,Aquamarine) >> {
+    }
+    class hooks << (S,Aquamarine) >> {
+        - hooks []Hook
+
+        - lock() 
+        - clone() hooks
+        - process(ctx context.Context, cmd Cmder, fn <font color=blue>func</font>(context.Context, Cmder) error) error
+        - processPipeline(ctx context.Context, cmds []Cmder, fn <font color=blue>func</font>(context.Context, []Cmder) error) error
+        - processTxPipeline(ctx context.Context, cmds []Cmder, fn <font color=blue>func</font>(context.Context, []Cmder) error) error
+
+        + AddHook(hook Hook) 
+
+    }
+    class queryOptions << (S,Aquamarine) >> {
+        - q url.Values
+        - err error
+
+        - string(name string) string
+        - int(name string) int
+        - duration(name string) time.Duration
+        - bool(name string) bool
+        - remaining() []string
+
+    }
+    class redis.ChannelOption << (T, #FF7700) >>  {
+    }
+    class redis.PoolStats << (T, #FF7700) >>  {
+    }
+    class redis.clusterSlotSlice << (T, #FF7700) >>  {
+    }
+    class redis.cmdable << (T, #FF7700) >>  {
+    }
+    class redis.pipelineExecer << (T, #FF7700) >>  {
+    }
+    class redis.pipelineProcessor << (T, #FF7700) >>  {
+    }
+    class redis.statefulCmdable << (T, #FF7700) >>  {
+    }
+    class rendezvousWrapper << (S,Aquamarine) >> {
+        + Get(key string) string
+
+    }
+    class ring << (S,Aquamarine) >> {
+        - opt *RingOptions
+        - shards *ringShards
+        - cmdsInfoCache *cmdsInfoCache
+
+    }
+    class ringShard << (S,Aquamarine) >> {
+        - down int32
+
+        + Client *Client
+
+        + String() string
+        + IsDown() bool
+        + IsUp() bool
+        + Vote(up bool) bool
+
+    }
+    class ringShards << (S,Aquamarine) >> {
+        - opt *RingOptions
+        - mu sync.RWMutex
+        - hash ConsistentHash
+        - shards <font color=blue>map</font>[string]*ringShard
+        - list []*ringShard
+        - numShard int
+        - closed bool
+
+        - rebalance() 
+
+        + List() []*ringShard
+        + Hash(key string) string
+        + GetByKey(key string) (*ringShard, error)
+        + GetByName(shardName string) (*ringShard, error)
+        + Random() (*ringShard, error)
+        + Heartbeat(frequency time.Duration) 
+        + Len() int
+        + Close() error
+
+    }
+    class sentinelFailover << (S,Aquamarine) >> {
+        - opt *FailoverOptions
+        - sentinelAddrs []string
+        - onFailover <font color=blue>func</font>(context.Context, string) 
+        - onUpdate <font color=blue>func</font>(context.Context) 
+        - mu sync.RWMutex
+        - sentinel *SentinelClient
+        - pubsub *PubSub
+
+        + _masterAddr string
+
+        - closeSentinel() error
+        - slaveAddrs(ctx context.Context, useDisconnected bool) ([]string, error)
+        - getMasterAddr(ctx context.Context, sentinel *SentinelClient) string
+        - getSlaveAddrs(ctx context.Context, sentinel *SentinelClient) []string
+        - trySwitchMaster(ctx context.Context, addr string) 
+        - setSentinel(ctx context.Context, sentinel *SentinelClient) 
+        - discoverSentinels(ctx context.Context) 
+        - listen(pubsub *PubSub) 
+
+        + Close() error
+        + RandomSlaveAddr(ctx context.Context) (string, error)
+        + MasterAddr(ctx context.Context) (string, error)
+
+    }
+    class statefulCmdable << (S,Aquamarine) >> {
+        + Auth(ctx context.Context, password string) *StatusCmd
+        + AuthACL(ctx context.Context, username string, password string) *StatusCmd
+        + Select(ctx context.Context, index int) *StatusCmd
+        + SwapDB(ctx context.Context, index1 int, index2 int) *StatusCmd
+        + ClientSetName(ctx context.Context, name string) *BoolCmd
+
+    }
+    interface timeoutError  {
+        + Timeout() bool
+
+    }
+    class "<font color=blue>func</font>(context.Context, []Cmder) error" as fontcolorbluefuncfontcontextContextCmdererror {
+        'This class was created so that we can correctly have an alias pointing to this name. Since it contains dots that can break namespaces
+    }
+    class "<font color=blue>func</font>(context.Context, *pool.Conn, []Cmder) (bool, error)" as fontcolorbluefuncfontcontextContextpoolConnCmderboolerror {
+        'This class was created so that we can correctly have an alias pointing to this name. Since it contains dots that can break namespaces
+    }
+    class "pool.Stats" as poolStats {
+        'This class was created so that we can correctly have an alias pointing to this name. Since it contains dots that can break namespaces
+    }
+}
+"redis.baseCmd" *-- "redis.BoolCmd"
+"redis.baseCmd" *-- "redis.BoolSliceCmd"
+"redis.baseClient" *-- "redis.Client"
+"redis.cmdable" *-- "redis.Client"
+"redis.hooks" *-- "redis.Client"
+"redis.clusterClient" *-- "redis.ClusterClient"
+"redis.cmdable" *-- "redis.ClusterClient"
+"redis.hooks" *-- "redis.ClusterClient"
+"redis.baseCmd" *-- "redis.ClusterSlotsCmd"
+"redis.baseCmd" *-- "redis.Cmd"
+"redis.baseCmd" *-- "redis.CommandsInfoCmd"
+"redis.conn" *-- "redis.Conn"
+"redis.baseCmd" *-- "redis.DurationCmd"
+"__builtin__.error" *-- "redis.Error"
+"redis.baseCmd" *-- "redis.FloatCmd"
+"redis.baseCmd" *-- "redis.FloatSliceCmd"
+"redis.baseCmd" *-- "redis.GeoLocationCmd"
+"redis.baseCmd" *-- "redis.GeoPosCmd"
+"redis.baseCmd" *-- "redis.GeoSearchLocationCmd"
+"redis.GeoSearchQuery" *-- "redis.GeoSearchLocationQuery"
+"redis.GeoSearchQuery" *-- "redis.GeoSearchStoreQuery"
+"redis.baseCmd" *-- "redis.IntCmd"
+"redis.baseCmd" *-- "redis.IntSliceCmd"
+"redis.cmdable" *-- "redis.Pipeline"
+"redis.statefulCmdable" *-- "redis.Pipeline"
+"redis.StatefulCmdable" *-- "redis.Pipeliner"
+"redis.cmdable" *-- "redis.Ring"
+"redis.hooks" *-- "redis.Ring"
+"redis.ring" *-- "redis.Ring"
+"redis.baseCmd" *-- "redis.ScanCmd"
+"redis.baseClient" *-- "redis.SentinelClient"
+"redis.hooks" *-- "redis.SentinelClient"
+"redis.baseCmd" *-- "redis.SliceCmd"
+"redis.baseCmd" *-- "redis.SlowLogCmd"
+"redis.Cmdable" *-- "redis.StatefulCmdable"
+"redis.baseCmd" *-- "redis.StatusCmd"
+"redis.baseCmd" *-- "redis.StringCmd"
+"redis.baseCmd" *-- "redis.StringIntMapCmd"
+"redis.baseCmd" *-- "redis.StringSliceCmd"
+"redis.baseCmd" *-- "redis.StringStringMapCmd"
+"redis.baseCmd" *-- "redis.StringStructMapCmd"
+"redis.baseCmd" *-- "redis.TimeCmd"
+"redis.baseClient" *-- "redis.Tx"
+"redis.cmdable" *-- "redis.Tx"
+"redis.hooks" *-- "redis.Tx"
+"redis.statefulCmdable" *-- "redis.Tx"
+"redis.Cmdable" *-- "redis.UniversalClient"
+"redis.baseCmd" *-- "redis.XAutoClaimCmd"
+"redis.baseCmd" *-- "redis.XAutoClaimJustIDCmd"
+"redis.baseCmd" *-- "redis.XInfoConsumersCmd"
+"redis.baseCmd" *-- "redis.XInfoGroupsCmd"
+"redis.baseCmd" *-- "redis.XInfoStreamCmd"
+"redis.baseCmd" *-- "redis.XInfoStreamFullCmd"
+"redis.baseCmd" *-- "redis.XMessageSliceCmd"
+"redis.baseCmd" *-- "redis.XPendingCmd"
+"redis.baseCmd" *-- "redis.XPendingExtCmd"
+"redis.baseCmd" *-- "redis.XStreamSliceCmd"
+"redis.baseCmd" *-- "redis.ZSliceCmd"
+"redis.Z" *-- "redis.ZWithKey"
+"redis.baseCmd" *-- "redis.ZWithKeyCmd"
+"redis.baseClient" *-- "redis.conn"
+"redis.cmdable" *-- "redis.conn"
+"redis.hooks" *-- "redis.conn"
+"redis.statefulCmdable" *-- "redis.conn"
+"go-rendezvous.Rendezvous" *-- "redis.rendezvousWrapper"
+
+"redis.Pipeliner" <|-- "redis.Pipeline"
+"redis.Scripter" <|-- "redis.cmdable"
+"redis.ConsistentHash" <|-- "redis.rendezvousWrapper"
+"redis.StatefulCmdable" <|-- "redis.statefulCmdable"
+
+namespace rediscensus {
+    class TracingHook << (S,Aquamarine) >> {
+        + BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error)
+        + AfterProcess(ctx context.Context, cmd redis.Cmder) error
+        + BeforeProcessPipeline(ctx context.Context, cmds []redis.Cmder) (context.Context, error)
+        + AfterProcessPipeline(ctx context.Context, cmds []redis.Cmder) error
+
+    }
+}
+
+"redis.Hook" <|-- "rediscensus.TracingHook"
+
+namespace redisotel {
+    interface Option  {
+        - apply( *config) 
+
+    }
+    class TracingHook << (S,Aquamarine) >> {
+        - tracer trace.Tracer
+        - attrs []attribute.KeyValue
+        - dbStmtEnabled bool
+
+        + BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error)
+        + AfterProcess(ctx context.Context, cmd redis.Cmder) error
+        + BeforeProcessPipeline(ctx context.Context, cmds []redis.Cmder) (context.Context, error)
+        + AfterProcessPipeline(ctx context.Context, cmds []redis.Cmder) error
+
+    }
+    class config << (S,Aquamarine) >> {
+        - tp trace.TracerProvider
+        - attrs []attribute.KeyValue
+        - dbStmtEnabled bool
+
+    }
+    class optionFunc << (S,Aquamarine) >> {
+        - apply(c *config) 
+
+    }
+    class redisotel.optionFunc << (T, #FF7700) >>  {
+    }
+}
+
+"redis.Hook" <|-- "redisotel.TracingHook"
+"redisotel.Option" <|-- "redisotel.optionFunc"
+
+"__builtin__.string" #.. "proto.RedisError"
+"hscan.fontcolorbluefuncfontreflectValuestringerror" #.. "hscan.decoderFunc"
+"proto.<font color=blue>func</font>(*Reader, int64) (<font color=blue>interface</font>{}, error)" #.. "proto.MultiBulkParse"
+"redis.<font color=blue>func</font>(*channel) " #.. "redis.ChannelOption"
+"redis.fontcolorbluefuncfontcontextContextpoolConnCmderboolerror" #.. "redis.pipelineProcessor"
+"redis.fontcolorbluefuncfontcontextContextCmdererror" #.. "redis.cmdable"
+"redis.fontcolorbluefuncfontcontextContextCmdererror" #.. "redis.statefulCmdable"
+"redis.fontcolorbluefuncfontcontextContextCmdererror" #.. "redis.pipelineExecer"
+"redis.[]*clusterSlot" #.. "redis.clusterSlotSlice"
+"redis.poolStats" #.. "redis.PoolStats"
+"redisotel.<font color=blue>func</font>(*config) " #.. "redisotel.optionFunc"
+@enduml
