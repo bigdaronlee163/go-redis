@@ -70,6 +70,7 @@ func (r *Reader) ReadLine() ([]byte, error) {
 //   - there is a pending read error;
 //   - or line does not end with \r\n.
 func (r *Reader) readLine() ([]byte, error) {
+	// 这里往下就是调用go的内建函数了。
 	b, err := r.rd.ReadSlice('\n')
 	if err != nil {
 		if err != bufio.ErrBufferFull {

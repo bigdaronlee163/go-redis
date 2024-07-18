@@ -190,7 +190,9 @@ func (c *baseClient) getConn(ctx context.Context) (*pool.Conn, error) {
 	return cn, nil
 }
 
+// 完整的 Get 方法实现如下（_getConn为上层调用Get的主调方）：
 func (c *baseClient) _getConn(ctx context.Context) (*pool.Conn, error) {
+
 	cn, err := c.connPool.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -200,6 +202,7 @@ func (c *baseClient) _getConn(ctx context.Context) (*pool.Conn, error) {
 		return cn, nil
 	}
 
+	//这里主要工作是当配置配了密码和DB的时候，这个连接之前命令之前要执行auth和select db命令
 	if err := c.initConn(ctx, cn); err != nil {
 		c.connPool.Remove(ctx, cn, err)
 		if err := errors.Unwrap(err); err != nil {
@@ -261,12 +264,17 @@ func (c *baseClient) initConn(ctx context.Context, cn *pool.Conn) error {
 	return nil
 }
 
+// go-redis 在每次执行命令失败以后，会判断当前失败类型，如果不是 redis server 的报错，
+// 也不是设置网络设置的timeout 报错，那么则会将该连接从连接池中 remove 掉，
+// 如果有设置重试次数，那么就会继续重试命令，又因为每次执行命令时会从连接池中获取连接，
+// 而没有又会新建，这样就实现了失败重连和自动剔除机制。
 func (c *baseClient) releaseConn(ctx context.Context, cn *pool.Conn, err error) {
 	if c.opt.Limiter != nil {
 		c.opt.Limiter.ReportResult(err)
 	}
 
 	if isBadConn(err, false, c.opt.Addr) {
+		// 连接失败则移除
 		c.connPool.Remove(ctx, cn, err)
 	} else {
 		c.connPool.Put(ctx, cn)
@@ -298,7 +306,7 @@ func (c *baseClient) withConn(
 	errc := make(chan error, 1)
 	// 这里启动了一个新的 goroutine 执行回调函数 fn，并将 fn 的返回结果发送到 errc 通道。
 	// 向通道里面写入fn的执行的结果，表示函数执行完毕。
-	// 【这里是执行write和read的逻辑的地方。】
+	// 【这里是执行write和read的逻辑的地方。cn 身上具有read和write的具体逻辑。】
 	go func() { errc <- fn(ctx, cn) }()
 
 	/*

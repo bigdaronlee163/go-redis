@@ -17,20 +17,20 @@ type Conn struct {
 	// 代表这tcp通信。
 	netConn net.Conn
 
-	rd *proto.Reader
+	rd *proto.Reader // 根据 Redis 通信协议实现的 Reader
 	bw *bufio.Writer
-	wr *proto.Writer
+	wr *proto.Writer // 根据 Redis 通信协议实现的 Writer
 
-	Inited    bool
-	pooled    bool
-	createdAt time.Time
+	Inited    bool      // 是否完成初始化（该连接是否初始化，比如如果需要执行命令之前需要执行的auth,select db 等的标识，代表已经auth,select过）
+	pooled    bool      // 是否放进连接池的标志，有些场景产生的连接是不需要放入连接池的
+	createdAt time.Time // 创建时间（超过maxconnage的连接需要淘汰）
 }
 
 func NewConn(netConn net.Conn) *Conn {
 	cn := &Conn{
 		netConn:   netConn,
 		createdAt: time.Now(),
-	}
+	}``
 	cn.rd = proto.NewReader(netConn)
 	cn.bw = bufio.NewWriter(netConn)
 	cn.wr = proto.NewWriter(cn.bw)
@@ -64,6 +64,7 @@ func (cn *Conn) RemoteAddr() net.Addr {
 	}
 	return nil
 }
+
 // 自定义的方法。不是go内置的方法。 [看方法签名]
 // 这个方法用于设置读取操作的超时并执行传入的函数 fn。
 // 设置读取超时：如果 timeout 不为零，调用 cn.netConn.SetReadDeadline 设置读取超时。超时时间由 cn.deadline(ctx, timeout) 计算得到。
@@ -74,8 +75,11 @@ func (cn *Conn) WithReader(ctx context.Context, timeout time.Duration, fn func(r
 			return err
 		}
 	}
+	// 这里我估计是go net.Conn 包中的执行。
+	// 虽然fn是proto里面的，但是实现了具体的接口就行。
 	return fn(cn.rd)
 }
+
 // 这个方法用于设置写入操作的超时、刷新缓冲区并执行传入的函数 fn。
 // 设置写入超时：如果 timeout 不为零，调用 cn.netConn.SetWriteDeadline 设置写入超时。超时时间由 cn.deadline(ctx, timeout) 计算得到。
 // 重置缓冲区：如果缓冲区中有数据（即 cn.bw.Buffered() > 0），调用 cn.bw.Reset(cn.netConn) 重置缓冲区。

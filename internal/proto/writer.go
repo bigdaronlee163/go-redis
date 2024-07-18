@@ -35,6 +35,7 @@ func NewWriter(wr writer) *Writer {
 }
 
 func (w *Writer) WriteArgs(args []interface{}) error {
+	// IO 包中的方法。WriteByte
 	if err := w.WriteByte(ArrayReply); err != nil {
 		return err
 	}
@@ -55,6 +56,7 @@ func (w *Writer) WriteArgs(args []interface{}) error {
 func (w *Writer) writeLen(n int) error {
 	w.lenBuf = strconv.AppendUint(w.lenBuf[:0], uint64(n), 10)
 	w.lenBuf = append(w.lenBuf, '\r', '\n')
+	// Write io中的方法。
 	_, err := w.Write(w.lenBuf)
 	return err
 }

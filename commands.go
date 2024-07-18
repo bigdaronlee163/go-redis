@@ -1533,6 +1533,7 @@ func (c cmdable) BLMove(
 //------------------------------------------------------------------------------
 
 func (c cmdable) SAdd(ctx context.Context, key string, members ...interface{}) *IntCmd {
+	// 初始长度为2，容量为2+len(members)。
 	args := make([]interface{}, 2, 2+len(members))
 	args[0] = "sadd"
 	args[1] = key
