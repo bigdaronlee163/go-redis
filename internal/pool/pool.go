@@ -96,6 +96,7 @@ type ConnPool struct {
 
 	stats Stats // 连接池统计的结构体（包含了使用数据）
 
+	// 在这个上面的操作是 原子的。 atomic.CompareAndSwapUint32(&p._closed, 0, 1)
 	_closed  uint32        // atomic  // 连接`池关闭标志，atomic
 	closedCh chan struct{} // 通知连接池关闭通道（用于主协程通知子协程的常用方法）
 }
@@ -151,6 +152,7 @@ func (p *ConnPool) checkMinIdleConns() {
 	// 如果连接池中空闲连接数小于最小空闲连接数，则补充连接
 	// 如果连接池中的 连接数已经达到最大连接数，则不再补充连接。【尽管此时没有空闲连接了，也不需要补充。】
 	//
+	// 这里是for循环，每个循环起一个协程，用于创建连接。 
 	for p.poolSize < p.opt.PoolSize && p.idleConnsLen < p.opt.MinIdleConns {
 		// 调用 checkMinIdleConns 的地方已经加锁了。
 		p.poolSize++
@@ -231,7 +233,7 @@ func (p *ConnPool) dialConn(ctx context.Context, pooled bool) (*Conn, error) {
 	if p.closed() {
 		return nil, ErrClosed
 	}
-
+	// 链接失败的次数。
 	if atomic.LoadUint32(&p.dialErrorsNum) >= uint32(p.opt.PoolSize) {
 		return nil, p.getLastDialError()
 	}
@@ -239,6 +241,7 @@ func (p *ConnPool) dialConn(ctx context.Context, pooled bool) (*Conn, error) {
 	netConn, err := p.opt.Dialer(ctx)
 	if err != nil {
 		p.setLastDialError(err)
+		// 在pool size 快慢的时候，再多尝试几次。tryDial
 		if atomic.AddUint32(&p.dialErrorsNum, 1) == uint32(p.opt.PoolSize) {
 			go p.tryDial()
 		}
