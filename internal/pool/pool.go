@@ -152,7 +152,7 @@ func (p *ConnPool) checkMinIdleConns() {
 	// 如果连接池中空闲连接数小于最小空闲连接数，则补充连接
 	// 如果连接池中的 连接数已经达到最大连接数，则不再补充连接。【尽管此时没有空闲连接了，也不需要补充。】
 	//
-	// 这里是for循环，每个循环起一个协程，用于创建连接。 
+	// 这里是for循环，每个循环起一个协程，用于创建连接。
 	for p.poolSize < p.opt.PoolSize && p.idleConnsLen < p.opt.MinIdleConns {
 		// 调用 checkMinIdleConns 的地方已经加锁了。
 		p.poolSize++
@@ -292,7 +292,7 @@ func (p *ConnPool) Get(ctx context.Context) (*Conn, error) {
 	}
 	// 如果能够写入说明不用等待就可以获取连接，否则需要等待其他地方从这个chan取走数据才可以获取连接，假如获取连接成功的话，在用完的时候，要向这个chan取出一个struct{}，不然的话就会让别人一直阻塞（如果在pooltimeout时间内没有等待到，就会超时返回），go-redis用这种方法保证池中的连接数量不会超过poolsize
 
-	// 等候获取queue中的令牌
+	// 等候获取queue中的令牌 【不是error就可以获取到。】
 	if err := p.waitTurn(ctx); err != nil {
 		return nil, err
 	}
@@ -348,18 +348,35 @@ func (p *ConnPool) getTurn() {
 
 // 注意下面的 timers 基于 sync.Pool 做了优化。
 func (p *ConnPool) waitTurn(ctx context.Context) error {
+	// 检查上下文是否已取消：如果上下文已取消，则立即返回取消错误 ctx.Err()。
+	// default 分支：如果上下文未取消，继续执行后续逻辑。
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
-
+	// 尝试放入队列：尝试将一个空的结构体放入队列 p.queue。
+	// 如果成功放入队列（即连接池有空闲连接），则返回 nil 表示成功。
+	// default 分支：如果队列已满（即连接池没有空闲连接），继续执行后续逻辑。
+	// 如果可以放入，就代表获取成功。
 	select {
 	case p.queue <- struct{}{}:
 		return nil
 	default:
 	}
+	// 设置定时器以等待超时
 
+	// 检查上下文是否已取消：
+	// 如果上下文已取消，停止定时器并返回取消错误 ctx.Err()。
+	// 如果定时器未能停止（可能定时器已触发），则读取定时器通道以防止泄漏。
+	// 将定时器放回池中。
+	// 尝试放入队列：
+	// 如果成功放入队列，表示获取了连接，停止定时器并返回 nil 表示成功。
+	// 如果定时器未能停止（可能定时器已触发），则读取定时器通道以防止泄漏。
+	// 将定时器放回池中。
+	// 等待超时：
+	// 如果定时器通道触发，表示等待超时，增加超时统计计数并返回超时错误 ErrPoolTimeout。
+	// 将定时器放回池中。
 	timer := timers.Get().(*time.Timer)
 	timer.Reset(p.opt.PoolTimeout)
 
@@ -368,6 +385,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 		if !timer.Stop() {
 			<-timer.C
 		}
+		// 表示复用定时器。
 		timers.Put(timer)
 		return ctx.Err()
 	case p.queue <- struct{}{}:
@@ -662,10 +680,11 @@ func (p *ConnPool) isStaleConn(cn *Conn) bool {
 	}
 
 	now := time.Now()
-	// 判断连接是否过期
+	// 判断连接是否过期  【先长时间没用的。 再移除创建时间过长的连接。】
 	if p.opt.IdleTimeout > 0 && now.Sub(cn.UsedAt()) >= p.opt.IdleTimeout {
 		return true
 	}
+
 	if p.opt.MaxConnAge > 0 && now.Sub(cn.createdAt) >= p.opt.MaxConnAge {
 		return true
 	}
