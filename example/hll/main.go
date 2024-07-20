@@ -17,17 +17,17 @@ func main() {
 	// _ = rdb.FlushDB(ctx).Err()
 
 	// for i := 0; i < 1; i++ {
-	if err := rdb.SAdd(ctx, "myset", fmt.Sprint(1)).Err(); err != nil {
-		panic(err)
-	}
+	// if err := rdb.SAdd(ctx, "myset", fmt.Sprint(1)).Err(); err != nil {
+	// 	panic(err)
+	// }
 
-	if err := rdb.SAdd(ctx, "myset", fmt.Sprint(2)).Err(); err != nil {
-		panic(err)
-	}
+	// if err := rdb.SAdd(ctx, "myset", fmt.Sprint(2)).Err(); err != nil {
+	// 	panic(err)
+	// }
 
-	if err := rdb.SAdd(ctx, "myset", fmt.Sprint(3)).Err(); err != nil {
-		panic(err)
-	}
+	// if err := rdb.SAdd(ctx, "myset", fmt.Sprint(3)).Err(); err != nil {
+	// 	panic(err)
+	// }
 	// }
 
 	// card, err := rdb.SCard(ctx, "myset").Result()

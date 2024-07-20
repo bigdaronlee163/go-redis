@@ -71,6 +71,8 @@ func (r *Reader) ReadLine() ([]byte, error) {
 //   - or line does not end with \r\n.
 func (r *Reader) readLine() ([]byte, error) {
 	// 这里往下就是调用go的内建函数了。
+	// ReadSlice('\n'): 这个方法从读取器中读取数据，直到遇到指定的分隔符，
+	// 在这里是换行符 \n。它返回一个包含读取数据的字节切片 b，数据中包括分隔符 \n。
 	b, err := r.rd.ReadSlice('\n')
 	if err != nil {
 		if err != bufio.ErrBufferFull {
