@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -298,7 +300,10 @@ func (c *baseClient) withConn(
 	并通过 select 语句等待上下文取消或回调完成。*/
 	done := ctx.Done() //nolint:ifshort
 	// 这里的fn是读写两个函数。
+	// 【这里的fn是fn func(context.Context, *pool.Conn) 不是注册在cn上的read和write函数。】
 	if done == nil {
+		fmt.Printf("Calling function: %s\n", runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name())
+
 		err = fn(ctx, cn)
 		return err
 	}
@@ -382,6 +387,7 @@ func (c *baseClient) _process(ctx context.Context, cmd Cmder, attempt int) (bool
 	*/
 	// 【 这个里面主要就是回调函数的注册（注册给连接conn 而不是c）。调用应该不是在这里，有另外的线程调用。】
 	// 【 go func() { errc <- fn(ctx, cn) }() 是执行逻辑的地方。 】
+	//
 	err := c.withConn(ctx, func(ctx context.Context, cn *pool.Conn) error {
 		// WithWriter 定义一个函数 函数体内容是 writeCmd(wr, cmd) 【每个命令一样】
 		err := cn.WithWriter(ctx, c.opt.WriteTimeout, func(wr *proto.Writer) error {

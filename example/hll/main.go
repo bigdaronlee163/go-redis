@@ -11,7 +11,8 @@ func main() {
 	ctx := context.Background()
 
 	rdb := redis.NewClient(&redis.Options{
-		Addr: ":6379",
+		Addr:        ":6379",
+		ReadTimeout: -1,  // 这个参数是怎么配置的。 
 	})
 	// _ = rdb.FlushDB(ctx).Err()
 
@@ -21,6 +22,10 @@ func main() {
 	}
 
 	if err := rdb.SAdd(ctx, "myset", fmt.Sprint(2)).Err(); err != nil {
+		panic(err)
+	}
+
+	if err := rdb.SAdd(ctx, "myset", fmt.Sprint(3)).Err(); err != nil {
 		panic(err)
 	}
 	// }

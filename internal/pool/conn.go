@@ -30,7 +30,7 @@ func NewConn(netConn net.Conn) *Conn {
 	cn := &Conn{
 		netConn:   netConn,
 		createdAt: time.Now(),
-	}``
+	}
 	cn.rd = proto.NewReader(netConn)
 	cn.bw = bufio.NewWriter(netConn)
 	cn.wr = proto.NewWriter(cn.bw)
@@ -70,6 +70,7 @@ func (cn *Conn) RemoteAddr() net.Addr {
 // 设置读取超时：如果 timeout 不为零，调用 cn.netConn.SetReadDeadline 设置读取超时。超时时间由 cn.deadline(ctx, timeout) 计算得到。
 // 执行传入的函数：传入的函数 fn 接收 cn.rd（一个 proto.Reader）并执行。
 func (cn *Conn) WithReader(ctx context.Context, timeout time.Duration, fn func(rd *proto.Reader) error) error {
+	// 等待的时间，超时报错。
 	if timeout != 0 {
 		if err := cn.netConn.SetReadDeadline(cn.deadline(ctx, timeout)); err != nil {
 			return err
