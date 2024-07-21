@@ -367,7 +367,7 @@ func (c *baseClient) _process(ctx context.Context, cmd Cmder, attempt int) (bool
 	}
 
 	retryTimeout := uint32(1)
-	// withConn函数里面，为什么
+	//  withConn函数里面，为什么
 	/*
 		func(context.Context, *pool.Conn) 是一个处理函数。
 		在 withConn 使用。
@@ -399,6 +399,7 @@ func (c *baseClient) _process(ctx context.Context, cmd Cmder, attempt int) (bool
 		// 什么时候有响应。
 		// cmd.readReply 是注册的 reader函数。什么时候调用呢？
 		// WithReader 注册  cmd.readReply 【根据响应的不同设置不同的响应处理函数。 】
+		//【 r.rd.ReadSlice('\n')  里面存在一个for循环。 】
 		err = cn.WithReader(ctx, c.cmdTimeout(cmd), cmd.readReply)
 		if err != nil {
 			if cmd.readTimeout() == nil {

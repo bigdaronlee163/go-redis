@@ -31,6 +31,12 @@ func (RedisError) RedisError() {}
 
 type MultiBulkParse func(*Reader, int64) (interface{}, error)
 
+// 1. 将处理单元，都通 \n 来切分。
+// 2. ReadReply 是读取响应的一个函数，用于根据前缀来读取不同的响应。
+//  1. int string array float 三种 reply
+//
+// 3. 还有一些其他的辅助函数。
+//  1. type MultiBulkParse func(*Reader, int64) (interface{}, error) 这个定义比较奇怪。
 type Reader struct {
 	rd   *bufio.Reader
 	_buf []byte
@@ -43,6 +49,7 @@ func NewReader(rd io.Reader) *Reader {
 	}
 }
 
+// 看还有多少可以读取的。
 func (r *Reader) Buffered() int {
 	return r.rd.Buffered()
 }
@@ -73,6 +80,7 @@ func (r *Reader) readLine() ([]byte, error) {
 	// 这里往下就是调用go的内建函数了。
 	// ReadSlice('\n'): 这个方法从读取器中读取数据，直到遇到指定的分隔符，
 	// 在这里是换行符 \n。它返回一个包含读取数据的字节切片 b，数据中包括分隔符 \n。
+	// ReadSlice 里面存在一个for循环，用于读取服务器的响应。
 	b, err := r.rd.ReadSlice('\n')
 	if err != nil {
 		if err != bufio.ErrBufferFull {

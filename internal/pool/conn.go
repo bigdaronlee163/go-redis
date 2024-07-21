@@ -12,6 +12,9 @@ import (
 
 var noDeadline = time.Time{}
 
+// 1. 定义一个链接，包装了 net.Conn 
+// 2. 通过WithReader WithWriter 定义了在这个链接上的读写函数。
+// 3. 然后还有一些链接的状态的获取的接口，例如上次使用时间。
 type Conn struct {
 	usedAt int64 // atomic
 	// 代表这tcp通信。

@@ -18,6 +18,8 @@ type writer interface {
 	WriteString(s string) (n int, err error)
 }
 
+// 1. WriteArgs 是一个主要的函数，用于写入参数（前缀  长度  具体参数）。
+// 2. 各种写入函数。 写入 byte string uint int  float crlf
 type Writer struct {
 	writer
 
