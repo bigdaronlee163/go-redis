@@ -8,11 +8,12 @@ import (
 )
 
 func main() {
+	// Background 的Done直接是返回 nil 的。
 	ctx := context.Background()
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr:        ":6379",
-		ReadTimeout: -1,  // 这个参数是怎么配置的。 
+		ReadTimeout: -1, // 这个参数是怎么配置的。
 	})
 	// _ = rdb.FlushDB(ctx).Err()
 
