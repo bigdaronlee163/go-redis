@@ -291,7 +291,7 @@ func (c *baseClient) withConn(
 	if err != nil {
 		return err
 	}
-	// 函数接受的时候释放连接。
+	// 函数结束的时候释放连接。
 	defer func() {
 		c.releaseConn(ctx, cn, err)
 	}()
@@ -306,7 +306,8 @@ func (c *baseClient) withConn(
 
 		err = fn(ctx, cn)
 		return err
-	}
+	} // 【这里没有使用else，表示仍有可能取消。select中的 case <-done: 就是代表可能取消得的情况。】
+	
 	// 这里创建了一个容量为 1 的错误通道 errc。这个通道用于在 goroutine 中传递回调函数 fn 执行的结果。
 	errc := make(chan error, 1)
 	// 这里启动了一个新的 goroutine 执行回调函数 fn，并将 fn 的返回结果发送到 errc 通道。
@@ -329,7 +330,7 @@ func (c *baseClient) withConn(
 	*/
 	// 这里没有for循环。
 	select {
-	// done是一个通道。
+	// done是一个通道。【上下文取消。】
 	case <-done:
 		_ = cn.Close()
 		// Wait for the goroutine to finish and send something.
@@ -338,7 +339,7 @@ func (c *baseClient) withConn(
 		err = ctx.Err()
 		return err
 	// errc 也是一个通道。
-	case err = <-errc:
+	case err = <-errc:  // 【上面明确是上下文取消，】
 		return err
 	}
 }

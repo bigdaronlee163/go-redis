@@ -28,7 +28,7 @@ func (e RedisError) Error() string { return string(e) }
 func (RedisError) RedisError() {}
 
 //------------------------------------------------------------------------------
-
+// MultiBulkParse 回调函数：用于具体解析多批量回复中的每个元素。
 type MultiBulkParse func(*Reader, int64) (interface{}, error)
 
 // 1. 将处理单元，都通 \n 来切分。
@@ -61,7 +61,7 @@ func (r *Reader) Peek(n int) ([]byte, error) {
 func (r *Reader) Reset(rd io.Reader) {
 	r.rd.Reset(rd)
 }
-
+// go-redis通过 redis 协议的规定，通过 /n 来逐行读取。 
 func (r *Reader) ReadLine() ([]byte, error) {
 	line, err := r.readLine()
 	if err != nil {
@@ -171,21 +171,24 @@ func (r *Reader) readStringReply(line []byte) (string, error) {
 	if isNilReply(line) {
 		return "", Nil
 	}
-
+	// 剔除 开头的 String的标识 $ 
 	replyLen, err := util.Atoi(line[1:])
 	if err != nil {
 		return "", err
 	}
-
+	// $1\r\n 需要包含 后面的 \r\n 
+	// 所以b里面存在的是 1\r\n 
 	b := make([]byte, replyLen+2)
 	_, err = io.ReadFull(r.rd, b)
 	if err != nil {
 		return "", err
 	}
-
+	// 这里又只读取 1 
 	return util.BytesToString(b[:replyLen]), nil
 }
 
+// 入参也是一个函数 MultiBulkParse 
+//  type MultiBulkParse func(*Reader, int64) (interface{}, error)
 func (r *Reader) ReadArrayReply(m MultiBulkParse) (interface{}, error) {
 	line, err := r.ReadLine()
 	if err != nil {

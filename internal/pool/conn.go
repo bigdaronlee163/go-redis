@@ -12,7 +12,7 @@ import (
 
 var noDeadline = time.Time{}
 
-// 1. 定义一个链接，包装了 net.Conn 
+// 1. 定义一个链接，包装了 net.Conn
 // 2. 通过WithReader WithWriter 定义了在这个链接上的读写函数。
 // 3. 然后还有一些链接的状态的获取的接口，例如上次使用时间。
 type Conn struct {
@@ -75,6 +75,7 @@ func (cn *Conn) RemoteAddr() net.Addr {
 func (cn *Conn) WithReader(ctx context.Context, timeout time.Duration, fn func(rd *proto.Reader) error) error {
 	// 等待的时间，超时报错。
 	if timeout != 0 {
+		// 和写操作的超时逻辑是一样的。
 		if err := cn.netConn.SetReadDeadline(cn.deadline(ctx, timeout)); err != nil {
 			return err
 		}
@@ -92,7 +93,10 @@ func (cn *Conn) WithReader(ctx context.Context, timeout time.Duration, fn func(r
 func (cn *Conn) WithWriter(
 	ctx context.Context, timeout time.Duration, fn func(wr *proto.Writer) error,
 ) error {
+	// 根据context中的环境的信息，设置当前这个链接的超时时间。
+	// 这里的 timeout 是 c.opt.WriteTimeout,
 	if timeout != 0 {
+		// SetWriteDeadline 是netConn 内建的接口。
 		if err := cn.netConn.SetWriteDeadline(cn.deadline(ctx, timeout)); err != nil {
 			return err
 		}
@@ -121,11 +125,13 @@ func (cn *Conn) deadline(ctx context.Context, timeout time.Duration) time.Time {
 	tm := time.Now()
 	cn.SetUsedAt(tm)
 
+	// 使用opt中的超时时间。设置写截止的时间。
 	if timeout > 0 {
 		tm = tm.Add(timeout)
 	}
 
 	if ctx != nil {
+		// deadline 也是一个时间点。
 		deadline, ok := ctx.Deadline()
 		if ok {
 			if timeout == 0 {
@@ -141,6 +147,6 @@ func (cn *Conn) deadline(ctx context.Context, timeout time.Duration) time.Time {
 	if timeout > 0 {
 		return tm
 	}
-
+	//  noDeadline（未定义的常量，表示没有超时）。
 	return noDeadline
 }

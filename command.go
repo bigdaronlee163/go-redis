@@ -1092,7 +1092,12 @@ func (cmd *StringSliceCmd) ScanSlice(container interface{}) error {
 	return proto.ScanSlice(cmd.Val(), container)
 }
 
+// 1. StringSliceCmd的readReply是 ReadArrayReply
 func (cmd *StringSliceCmd) readReply(rd *proto.Reader) error {
+
+	// MultiBulkParse 定义比较奇怪，特别是第一返回的参数。
+	// MultiBulkParse 又是在 调用  ReadArrayReply 的时候定义并且传入的，通过这个来
+	// MultiBulkParse 回调函数：用于具体解析多批量回复中的每个元素。
 	_, err := rd.ReadArrayReply(func(rd *proto.Reader, n int64) (interface{}, error) {
 		cmd.val = make([]string, n)
 		for i := 0; i < len(cmd.val); i++ {
