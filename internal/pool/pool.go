@@ -350,6 +350,7 @@ func (p *ConnPool) getTurn() {
 func (p *ConnPool) waitTurn(ctx context.Context) error {
 	// 检查上下文是否已取消：如果上下文已取消，则立即返回取消错误 ctx.Err()。
 	// default 分支：如果上下文未取消，继续执行后续逻辑。
+	//【 这里的select相当于if判断，判断一下，然后走defualt， 然后在往下执行。】
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
