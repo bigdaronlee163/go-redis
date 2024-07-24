@@ -132,7 +132,7 @@ func NewConnPool(opt *Options) *ConnPool {
 	p.connsMu.Lock()
 	p.checkMinIdleConns()
 	p.connsMu.Unlock()
-
+	// TODO(DDD) 为什么还需要判断 IdleTimeout ?
 	if opt.IdleTimeout > 0 && opt.IdleCheckFrequency > 0 {
 		// 如果配置了空闲连接超时时间 && 检查空闲连接频率
 		// 则单独开启一个清理空闲连接的协程（定期）
@@ -291,7 +291,6 @@ func (p *ConnPool) Get(ctx context.Context) (*Conn, error) {
 		return nil, ErrClosed
 	}
 	// 如果能够写入说明不用等待就可以获取连接，否则需要等待其他地方从这个chan取走数据才可以获取连接，假如获取连接成功的话，在用完的时候，要向这个chan取出一个struct{}，不然的话就会让别人一直阻塞（如果在pooltimeout时间内没有等待到，就会超时返回），go-redis用这种方法保证池中的连接数量不会超过poolsize
-
 	// 等候获取queue中的令牌 【不是error就可以获取到。】
 	if err := p.waitTurn(ctx); err != nil {
 		return nil, err
@@ -299,6 +298,8 @@ func (p *ConnPool) Get(ctx context.Context) (*Conn, error) {
 
 	for {
 		p.connsMu.Lock()
+		// 从slice中拿出一个连接，通过popIdle方法的封装，可以完成不同的取连接的方式。
+		// 虽然写在这里也行，但是封装还是更好的。
 		cn, err := p.popIdle()
 		p.connsMu.Unlock()
 
@@ -310,7 +311,6 @@ func (p *ConnPool) Get(ctx context.Context) (*Conn, error) {
 			break
 		}
 		// 如果连接已经过期，那么强行关闭此连接，然后重新从空闲队列中获取（判断从空闲连接切片中拿出来的连接是否过期，兜底）
-
 		if p.isStaleConn(cn) {
 			_ = p.CloseConn(cn)
 			continue
@@ -367,16 +367,16 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 	// 设置定时器以等待超时
 
 	// 检查上下文是否已取消：
-	// 如果上下文已取消，停止定时器并返回取消错误 ctx.Err()。
-	// 如果定时器未能停止（可能定时器已触发），则读取定时器通道以防止泄漏。
-	// 将定时器放回池中。
+	//  如果上下文已取消，停止定时器并返回取消错误 ctx.Err()。
+	//  如果定时器未能停止（可能定时器已触发），则读取定时器通道以防止泄漏。
+	//  将定时器放回池中。
 	// 尝试放入队列：
-	// 如果成功放入队列，表示获取了连接，停止定时器并返回 nil 表示成功。
-	// 如果定时器未能停止（可能定时器已触发），则读取定时器通道以防止泄漏。
-	// 将定时器放回池中。
+	//  如果成功放入队列，表示获取了连接，停止定时器并返回 nil 表示成功。
+	//  如果定时器未能停止（可能定时器已触发），则读取定时器通道以防止泄漏。
+	//  将定时器放回池中。
 	// 等待超时：
-	// 如果定时器通道触发，表示等待超时，增加超时统计计数并返回超时错误 ErrPoolTimeout。
-	// 将定时器放回池中。
+	// 	如果定时器通道触发，表示等待超时，增加超时统计计数并返回超时错误 ErrPoolTimeout。
+	//  将定时器放回池中。
 	timer := timers.Get().(*time.Timer)
 	timer.Reset(p.opt.PoolTimeout)
 
@@ -396,6 +396,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 		return nil
 	case <-timer.C:
 		timers.Put(timer)
+		// 统计超时的次数。
 		atomic.AddUint32(&p.stats.Timeouts, 1)
 		return ErrPoolTimeout
 	}
@@ -419,12 +420,13 @@ func (p *ConnPool) popIdle() (*Conn, error) {
 
 	var cn *Conn
 	// 这个是后面的优化。
+	// 队列的数据结构。
 	if p.opt.PoolFIFO {
 		cn = p.idleConns[0]
 		copy(p.idleConns, p.idleConns[1:])
 		p.idleConns = p.idleConns[:n-1]
 	} else {
-		// 栈的数据结构，取最后一个连接
+		// 栈的数据结构（LIFO），取最后一个连接
 		idx := n - 1
 		cn = p.idleConns[idx]
 		p.idleConns = p.idleConns[:idx]
