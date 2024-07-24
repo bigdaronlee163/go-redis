@@ -366,7 +366,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 	default:
 	}
 	// 设置定时器以等待超时
-
+	// 下面的select顺序判断执行case: 
 	// 检查上下文是否已取消：
 	//  如果上下文已取消，停止定时器并返回取消错误 ctx.Err()。
 	//  如果定时器未能停止（可能定时器已触发），则读取定时器通道以防止泄漏。
@@ -378,6 +378,13 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 	// 等待超时：
 	// 	如果定时器通道触发，表示等待超时，增加超时统计计数并返回超时错误 ErrPoolTimeout。
 	//  将定时器放回池中。
+
+	// 【在执行的执行下面的select语句的时候，
+	//  如果指定到第二个case没有写入成功，
+	//  然后继续往下执行，然后第三个也没有成功，
+	//  那么select就会等待在这几个通道上面。
+	//  此时，定时器到了，还没有可以往queue写入，
+	//  则表示等待可用的连接超时。】
 	timer := timers.Get().(*time.Timer)
 	timer.Reset(p.opt.PoolTimeout)
 
