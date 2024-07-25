@@ -299,7 +299,7 @@ func (p *ConnPool) Get(ctx context.Context) (*Conn, error) {
 	if err := p.waitTurn(ctx); err != nil {
 		return nil, err
 	}
-
+	// for 循环 尝试拿一个连接出来。
 	for {
 		p.connsMu.Lock()
 		// 从slice中拿出一个连接，通过popIdle方法的封装，可以完成不同的取连接的方式。
@@ -436,12 +436,15 @@ func (p *ConnPool) popIdle() (*Conn, error) {
 	// 队列的数据结构。
 	if p.opt.PoolFIFO {
 		cn = p.idleConns[0]
+		// 将 p.idleConns[1:] copy到 p.idleConns
+		// 然后将最后的一个，丢弃掉。让gc回收。
 		copy(p.idleConns, p.idleConns[1:])
 		p.idleConns = p.idleConns[:n-1]
 	} else {
 		// 栈的数据结构（LIFO），取最后一个连接
 		idx := n - 1
 		cn = p.idleConns[idx]
+		// 【写起来比上面简单。】
 		p.idleConns = p.idleConns[:idx]
 	}
 	p.idleConnsLen--
@@ -541,6 +544,7 @@ func (p *ConnPool) Len() int {
 // IdleLen returns number of idle connections.
 func (p *ConnPool) IdleLen() int {
 	p.connsMu.Lock()
+	// conn 没有len变量。
 	n := p.idleConnsLen
 	p.connsMu.Unlock()
 	return n
