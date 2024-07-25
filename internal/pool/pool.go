@@ -159,6 +159,7 @@ func (p *ConnPool) checkMinIdleConns() {
 		p.idleConnsLen++
 
 		go func() {
+			// addIdleConn newConn 都用到了  dialConn 来创建新链接。
 			err := p.addIdleConn()
 			// 创建失败。回退之前的加操作。
 			if err != nil && err != ErrClosed {
@@ -193,6 +194,9 @@ func (p *ConnPool) addIdleConn() error {
 	return nil
 }
 
+// NewConn 到处给redis.go 用，在cluster sentinel都用到了。
+// 和 conn 的区别是，conn是包装，而pool的NewConn是创建一个新链接，而
+// pool的N ewConn 用conn NewConn 来包装 net.Conn添加 其他的信息（使用时间，创建时间。）
 func (p *ConnPool) NewConn(ctx context.Context) (*Conn, error) {
 	return p.newConn(ctx, false)
 }
@@ -310,6 +314,7 @@ func (p *ConnPool) Get(ctx context.Context) (*Conn, error) {
 		if cn == nil {
 			break
 		}
+
 		// 如果连接已经过期，那么强行关闭此连接，然后重新从空闲队列中获取（判断从空闲连接切片中拿出来的连接是否过期，兜底）
 		if p.isStaleConn(cn) {
 			_ = p.CloseConn(cn)
@@ -366,7 +371,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 	default:
 	}
 	// 设置定时器以等待超时
-	// 下面的select顺序判断执行case: 
+	// 下面的select顺序判断执行case:
 	// 检查上下文是否已取消：
 	//  如果上下文已取消，停止定时器并返回取消错误 ctx.Err()。
 	//  如果定时器未能停止（可能定时器已触发），则读取定时器通道以防止泄漏。
@@ -410,7 +415,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 	}
 }
 
-// 放回令牌
+// 放回令牌 【从q.queue中读取。】
 func (p *ConnPool) freeTurn() {
 	<-p.queue
 }
@@ -690,6 +695,7 @@ func (p *ConnPool) isStaleConn(cn *Conn) bool {
 	}
 
 	now := time.Now()
+	// 这两个太严格了。但是感觉应该还是有用的，因为需要检测链接存活的情况，不可能一直keeplive
 	// 判断连接是否过期  【先长时间没用的。 再移除创建时间过长的连接。】
 	if p.opt.IdleTimeout > 0 && now.Sub(cn.UsedAt()) >= p.opt.IdleTimeout {
 		return true
