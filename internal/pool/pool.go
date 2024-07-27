@@ -149,8 +149,8 @@ func (p *ConnPool) checkMinIdleConns() {
 	if p.opt.MinIdleConns == 0 {
 		return
 	}
-	// 如果连接池中空闲连接数小于最小空闲连接数，则补充连接
 	// 如果连接池中的 连接数已经达到最大连接数，则不再补充连接。【尽管此时没有空闲连接了，也不需要补充。】
+	// 如果连接池中空闲连接数小于最小空闲连接数，则补充连接
 	//
 	// 这里是for循环，每个循环起一个协程，用于创建连接。
 	for p.poolSize < p.opt.PoolSize && p.idleConnsLen < p.opt.MinIdleConns {
@@ -499,7 +499,13 @@ func (p *ConnPool) removeConnWithLock(cn *Conn) {
 	p.removeConn(cn)
 	p.connsMu.Unlock()
 }
-
+// 
+// 1. removeConn 在 CloseConn 调用， CloseConn 在Get调用。
+//      传入的 cn 为在Get中从idleConn获取的连接。
+//      判断从idleConn取出来的连接是否过期。
+// 2. removeConn 在 Remove 调用 Remove 在 Put调用，
+//    将连接还给idleConn的时候，判断是否还有未读取的
+// 两者的共同特点是，连接都从idleConn中拿了出来。
 func (p *ConnPool) removeConn(cn *Conn) {
 	// 遍历连接队列找到要关闭的连接，并将其移除出连接队列
 
@@ -652,6 +658,7 @@ func (p *ConnPool) ReapStaleConns() (int, error) {
 	var n int
 	for {
 		// 先获取令牌：需要向queue chan写进数据才能往下执行，否则就会阻塞，等queue有容量
+		// 如果不能往queue中写入数据的话， 那就代表所有的conn都处于使用状态。
 		p.getTurn()
 
 		p.connsMu.Lock()
@@ -683,7 +690,8 @@ func (p *ConnPool) reapStaleConn() *Conn {
 	if !p.isStaleConn(cn) {
 		return nil
 	}
-
+	// 从 idleConn 和 conn 中都移除。
+	// removeConn 就是从Conn中移除。
 	p.idleConns = append(p.idleConns[:0], p.idleConns[1:]...)
 	p.idleConnsLen--
 	p.removeConn(cn)

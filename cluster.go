@@ -23,6 +23,7 @@ var errClusterNoNodes = fmt.Errorf("redis: cluster has no nodes")
 
 // ClusterOptions are used to configure a cluster client and should be
 // passed to NewClusterClient.
+// 创建一个集群的 redis client
 type ClusterOptions struct {
 	// A seed list of host:port addresses of cluster nodes.
 	Addrs []string
@@ -34,7 +35,7 @@ type ClusterOptions struct {
 	// on network errors and MOVED/ASK redirects.
 	// Default is 3 retries.
 	MaxRedirects int
-
+	// 下面这几个命令都是对只读命令的配置。
 	// Enables read-only commands on slave nodes.
 	ReadOnly bool
 	// Allows routing read-only commands to the closest master or slave node.
@@ -765,6 +766,7 @@ func (c *ClusterClient) Do(ctx context.Context, args ...interface{}) *Cmd {
 }
 
 func (c *ClusterClient) Process(ctx context.Context, cmd Cmder) error {
+	// 函数指针传入到 hooks 内。 c.process
 	return c.hooks.process(ctx, cmd, c.process)
 }
 
