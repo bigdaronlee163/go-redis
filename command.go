@@ -3196,10 +3196,10 @@ func (cmd *GeoPosCmd) readReply(rd *proto.Reader) error {
 	return err
 }
 
-//------------------------------------------------------------------------------
-
+// ------------------------------------------------------------------------------
 type CommandInfo struct {
-	Name        string
+	Name string
+	// 命令的参数个数。正值表示固定参数个数
 	Arity       int8
 	Flags       []string
 	ACLFlags    []string

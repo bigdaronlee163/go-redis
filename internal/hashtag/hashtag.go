@@ -47,6 +47,8 @@ var crc16tab = [256]uint16{
 	0x6e17, 0x7e36, 0x4e55, 0x5e74, 0x2e93, 0x3eb2, 0x0ed1, 0x1ef0,
 }
 
+// Key("{user:1000}.name") 返回 "user:1000".
+// Key("user:1000.name") 返回 "user:1000.name"（没有哈希标签）。
 func Key(key string) string {
 	if s := strings.IndexByte(key, '{'); s > -1 {
 		if e := strings.IndexByte(key[s+1:], '}'); e > 0 {
@@ -56,12 +58,15 @@ func Key(key string) string {
 	return key
 }
 
+// 这个函数返回一个随机的哈希槽编号，范围在 0 到 16383 之间。
+// 使用内部的 rand 包生成一个随机整数，并取模 16384。
 func RandomSlot() int {
 	return rand.Intn(slotNumber)
 }
 
 // Slot returns a consistent slot number between 0 and 16383
 // for any given string key.
+// 计算hash槽。
 func Slot(key string) int {
 	if key == "" {
 		return RandomSlot()
@@ -70,6 +75,8 @@ func Slot(key string) int {
 	return int(crc16sum(key)) % slotNumber
 }
 
+// 这个函数计算给定字符串的 CRC16 校验和，使用的是 CCITT 标准。
+// 通过遍历字符串中的每个字符，使用 CRC16 查找表 crc16tab 进行累加计算，得到最终的 CRC16 校验和。
 func crc16sum(key string) (crc uint16) {
 	for i := 0; i < len(key); i++ {
 		crc = (crc << 8) ^ crc16tab[(byte(crc>>8)^key[i])&0x00ff]

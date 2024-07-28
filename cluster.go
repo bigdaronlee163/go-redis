@@ -168,8 +168,8 @@ func (opt *ClusterOptions) clientOptions() *Options {
 	}
 }
 
-//------------------------------------------------------------------------------
-
+// ------------------------------------------------------------------------------
+// clusterNode：集群节点抽象。client为连接此节点的客户端，generation与clusterState的generation关联。
 type clusterNode struct {
 	Client *Client
 
@@ -253,8 +253,8 @@ func (n *clusterNode) SetGeneration(gen uint32) {
 	}
 }
 
-//------------------------------------------------------------------------------
-
+// ------------------------------------------------------------------------------
+// clusterNodes：维护集群内「实例地址=>节点」的映射
 type clusterNodes struct {
 	opt *ClusterOptions
 
@@ -420,8 +420,8 @@ func (c *clusterNodes) Random() (*clusterNode, error) {
 	return c.GetOrCreate(addrs[n])
 }
 
-//------------------------------------------------------------------------------
-
+// ------------------------------------------------------------------------------
+// clusterSlot：一个范围的哈希槽以及负责这些槽的节点（第一个为主节点，其余为从节点），start为起始哈希槽编号，end为起结束希槽编号，nodes为负责这些槽的节点。
 type clusterSlot struct {
 	start, end int
 	nodes      []*clusterNode
@@ -441,6 +441,7 @@ func (p clusterSlotSlice) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 }
 
+// clusterState：维护集群内「哈希槽=>节点」的映射，创建后不可修改，只能通过新建替换更新，每次新建 generation 自增。createdAt 为创建时间。
 type clusterState struct {
 	nodes   *clusterNodes
 	Masters []*clusterNode
@@ -694,6 +695,7 @@ type clusterClient struct {
 // ClusterClient is a Redis Cluster client representing a pool of zero
 // or more underlying connections. It's safe for concurrent use by
 // multiple goroutines.
+// clusterClient：集群客户端抽象
 type ClusterClient struct {
 	*clusterClient
 	cmdable
@@ -773,7 +775,7 @@ func (c *ClusterClient) Process(ctx context.Context, cmd Cmder) error {
 func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 	cmdInfo := c.cmdInfo(cmd.Name())
 	slot := c.cmdSlot(cmd)
-
+	// clusterNode 对 Client的封装。（client共享一个连接池吗？ ）
 	var node *clusterNode
 	var ask bool
 	var lastErr error
