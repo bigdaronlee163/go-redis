@@ -307,7 +307,7 @@ func (c *baseClient) withConn(
 		err = fn(ctx, cn)
 		return err
 	} // 【这里没有使用else，表示仍有可能取消。select中的 case <-done: 就是代表可能取消得的情况。】
-	
+
 	// 这里创建了一个容量为 1 的错误通道 errc。这个通道用于在 goroutine 中传递回调函数 fn 执行的结果。
 	errc := make(chan error, 1)
 	// 这里启动了一个新的 goroutine 执行回调函数 fn，并将 fn 的返回结果发送到 errc 通道。
@@ -339,7 +339,7 @@ func (c *baseClient) withConn(
 		err = ctx.Err()
 		return err
 	// errc 也是一个通道。
-	case err = <-errc:  // 【上面明确是上下文取消，】
+	case err = <-errc: // 【上面明确是上下文取消，】
 		return err
 	}
 }
@@ -613,7 +613,9 @@ type Client struct {
 // NewClient returns a client to the Redis Server specified by Options.
 func NewClient(opt *Options) *Client {
 	opt.init()
-
+	// 每个 NewClient 都有一个链接。
+	// 如果同时有很多命令执行，那么会需要很多链接。
+	// 所以每个client都有一个pool.
 	c := Client{
 		baseClient: newBaseClient(opt, newConnPool(opt)),
 		ctx:        context.Background(),

@@ -179,6 +179,7 @@ type clusterNode struct {
 }
 
 func newClusterNode(clOpt *ClusterOptions, addr string) *clusterNode {
+	// 从cluster中读取client的配置。然后根据这个配置创建客户端。
 	opt := clOpt.clientOptions()
 	opt.Addr = addr
 	node := clusterNode{
@@ -353,6 +354,7 @@ func (c *clusterNodes) GC(generation uint32) {
 	}
 }
 
+// 用到的时候，才创建。
 func (c *clusterNodes) GetOrCreate(addr string) (*clusterNode, error) {
 	node, err := c.get(addr)
 	if err != nil {
@@ -373,10 +375,11 @@ func (c *clusterNodes) GetOrCreate(addr string) (*clusterNode, error) {
 	if ok {
 		return node, nil
 	}
-
+	// 创建集群中的一个节点。
 	node = newClusterNode(c.opt, addr)
 
 	c.addrs = appendIfNotExists(c.addrs, addr)
+	// 根据 id:port确定一个node.
 	c.nodes[addr] = node
 
 	return node, nil
@@ -773,6 +776,7 @@ func (c *ClusterClient) Process(ctx context.Context, cmd Cmder) error {
 }
 
 func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
+	// Name 返回命令的小写形式。
 	cmdInfo := c.cmdInfo(cmd.Name())
 	slot := c.cmdSlot(cmd)
 	// clusterNode 对 Client的封装。（client共享一个连接池吗？ ）
@@ -1586,7 +1590,7 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 	}
 
 	var firstErr error
-
+	// Permutation, 返回一个随机序列。
 	perm := rand.Perm(len(addrs))
 	if len(perm) > nodeLimit {
 		perm = perm[:nodeLimit]
@@ -1602,7 +1606,8 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 			}
 			continue
 		}
-
+		// 在这里调用 client 的方法。
+		// 后面就是 client 的方法调用了。
 		info, err := node.Client.Command(ctx).Result()
 		if err == nil {
 			return info, nil

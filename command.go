@@ -3242,6 +3242,7 @@ func (cmd *CommandsInfoCmd) String() string {
 	return cmdString(cmd, cmd.val)
 }
 
+// CommandsInfoCmd 读取响应。
 func (cmd *CommandsInfoCmd) readReply(rd *proto.Reader) error {
 	_, err := rd.ReadArrayReply(func(rd *proto.Reader, n int64) (interface{}, error) {
 		cmd.val = make(map[string]*CommandInfo, n)
@@ -3257,7 +3258,7 @@ func (cmd *CommandsInfoCmd) readReply(rd *proto.Reader) error {
 	})
 	return err
 }
-
+// ReadReply 的回调函数。
 func commandInfoParser(rd *proto.Reader, n int64) (interface{}, error) {
 	const numArgRedis5 = 6
 	const numArgRedis6 = 7
