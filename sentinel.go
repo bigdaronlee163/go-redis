@@ -45,7 +45,7 @@ type FailoverOptions struct {
 	// Use slaves disconnected with master when cannot get connected slaves
 	// Now, this option only works in RandomSlaveAddr function.
 	UseDisconnectedSlaves bool
-
+	// 上面的配置，都是有关sentinel的。
 	// Following options are copied from Options struct.
 
 	Dialer    func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -53,7 +53,8 @@ type FailoverOptions struct {
 
 	Username string
 	Password string
-	DB       int
+	// 选择的数据库编号。
+	DB int
 
 	MaxRetries      int
 	MinRetryBackoff time.Duration
@@ -77,6 +78,7 @@ type FailoverOptions struct {
 }
 
 func (opt *FailoverOptions) clientOptions() *Options {
+	//  普通的 Option （后面的才是返回值。。。）
 	return &Options{
 		Addr: "FailoverClient",
 
@@ -260,6 +262,7 @@ type SentinelClient struct {
 }
 
 func NewSentinelClient(opt *Options) *SentinelClient {
+	// 这个不是包的init函数，是options的方法。
 	opt.init()
 	c := &SentinelClient{
 		baseClient: &baseClient{
@@ -279,6 +282,7 @@ func (c *SentinelClient) WithContext(ctx context.Context) *SentinelClient {
 	if ctx == nil {
 		panic("nil context")
 	}
+	// 新创建的变量。
 	clone := *c
 	clone.ctx = ctx
 	return &clone

@@ -6,6 +6,7 @@ import (
 	"github.com/go-redis/redis/v8/internal/rand"
 )
 // 避免同时请求。
+// 避免惊群效应
 func RetryBackoff(retry int, minBackoff, maxBackoff time.Duration) time.Duration {
 	if retry < 0 {
 		panic("not reached")
