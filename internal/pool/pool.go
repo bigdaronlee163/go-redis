@@ -188,7 +188,8 @@ func (p *ConnPool) addIdleConn() error {
 		_ = cn.Close()
 		return ErrClosed
 	}
-
+	// 为什么需要两个都添加？
+	// put操作是将conn归还给 idleConns 。
 	p.conns = append(p.conns, cn)         // 增加连接队列
 	p.idleConns = append(p.idleConns, cn) // 增加轮转队列
 	return nil
