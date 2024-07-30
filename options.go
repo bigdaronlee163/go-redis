@@ -150,13 +150,15 @@ func (opt *Options) init() {
 	case -1:
 		opt.ReadTimeout = 0
 	case 0:
-		opt.ReadTimeout = 3 * time.Second
+		// opt.ReadTimeout = 3 * time.Second
+		opt.ReadTimeout = 0
 	}
 	switch opt.WriteTimeout {
 	case -1:
 		opt.WriteTimeout = 0
 	case 0:
-		opt.WriteTimeout = opt.ReadTimeout
+		// opt.WriteTimeout = opt.ReadTimeout
+		opt.WriteTimeout = 0
 	}
 	if opt.PoolTimeout == 0 {
 		opt.PoolTimeout = opt.ReadTimeout + time.Second

@@ -713,7 +713,9 @@ func NewClusterClient(opt *ClusterOptions) *ClusterClient {
 
 	c := &ClusterClient{
 		clusterClient: &clusterClient{
-			opt:   opt,
+			opt: opt,
+			// 这里并没与创建具体的node,而是将传入的地址，
+			// 记录在opt里面，并且创建ip:port 到node的map.
 			nodes: newClusterNodes(opt),
 		},
 		ctx: context.Background(),
@@ -1592,6 +1594,7 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 	var firstErr error
 	// Permutation, 返回一个随机序列。
 	perm := rand.Perm(len(addrs))
+	// 最多尝试三个节点。
 	if len(perm) > nodeLimit {
 		perm = perm[:nodeLimit]
 	}
