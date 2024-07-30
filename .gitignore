@@ -1,3 +1,9 @@
 *.rdb
 testdata/*
 .idea/
+example/redis-cluster/create-cluster/*.log
+example/redis-cluster/create-cluster/*.conf
+example/redis-cluster/create-cluster/*.aof
+example/redis-cluster/create-cluster/*.manifest
+example/redis-cluster/create-cluster/appendonlydir*/
+__debug_*
