@@ -720,6 +720,8 @@ func NewClusterClient(opt *ClusterOptions) *ClusterClient {
 		},
 		ctx: context.Background(),
 	}
+	// 这里传入两个函数。cmdsInfo 获取所有cmd的信息。
+	// cmdable也是一个函数。
 	c.state = newClusterStateHolder(c.loadState)
 	c.cmdsInfoCache = newCmdsInfoCache(c.cmdsInfo)
 	c.cmdable = c.Process
@@ -778,7 +780,7 @@ func (c *ClusterClient) Process(ctx context.Context, cmd Cmder) error {
 }
 
 func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
-	// Name 返回命令的小写形式。
+	// Name 返回命令的小写形式。【通过comand的信息获取的支持的cmd之后，才回去执行命令。】
 	cmdInfo := c.cmdInfo(cmd.Name())
 	slot := c.cmdSlot(cmd)
 	// clusterNode 对 Client的封装。（client共享一个连接池吗？ ）
@@ -1627,7 +1629,7 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 }
 
 func (c *ClusterClient) cmdInfo(name string) *CommandInfo {
-	cmdsInfo, err := c.cmdsInfoCache.Get(c.ctx)
+	cmdsInfo, err := c.cmdsInfoCache.Get(c.ctx) 	// 在这里会从服务器获取cmd的信息。
 	if err != nil {
 		return nil
 	}

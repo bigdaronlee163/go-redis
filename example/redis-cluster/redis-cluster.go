@@ -22,7 +22,7 @@ func main() {
 	// 	panic(err)
 	// }
 
-	if err := rdb.SAdd(ctx, "myset", fmt.Sprint(1)).Err(); err != nil {
+	if err := rdb.SAdd(ctx, "myset", fmt.Sprint(2)).Err(); err != nil {
 		panic(err)
 	}
 
