@@ -22,6 +22,7 @@ type pipelineExecer func(context.Context, []Cmder) error
 // can be retransmitted and commands can be executed more then once.
 // To avoid this: it is good idea to use reasonable bigger read/write timeouts
 // depends of your batch size and/or use TxPipeline.
+// Pipeline 不可靠
 type Pipeliner interface {
 	StatefulCmdable
 	Len() int
