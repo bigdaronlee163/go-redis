@@ -457,7 +457,7 @@ func (c statefulCmdable) ClientSetName(ctx context.Context, name string) *BoolCm
 }
 
 //------------------------------------------------------------------------------
-
+// 用于读取redis的命令信息。 
 func (c cmdable) Command(ctx context.Context) *CommandsInfoCmd {
 	cmd := NewCommandsInfoCmd(ctx, "command")
 	_ = c(ctx, cmd)

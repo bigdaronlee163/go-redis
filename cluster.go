@@ -128,10 +128,12 @@ func (opt *ClusterOptions) init() {
 	}
 
 	if opt.NewClient == nil {
+		// NewClient 是redis包中的创建单机RedisClient的函数。
 		opt.NewClient = NewClient
 	}
 }
 
+// 返回单个redis的配置。关于认证信息。 网络配置。连接池配置。证书等信息。
 func (opt *ClusterOptions) clientOptions() *Options {
 	const disableIdleCheck = -1
 
@@ -172,10 +174,11 @@ func (opt *ClusterOptions) clientOptions() *Options {
 // clusterNode：集群节点抽象。client为连接此节点的客户端，generation与clusterState的generation关联。
 type clusterNode struct {
 	Client *Client
-
+	// 记录节点的延迟，可以配置只读命令从哪个节点读取数据。
 	latency    uint32 // atomic
 	generation uint32 // atomic
-	failing    uint32 // atomic
+	// 判断节点是否下线。
+	failing uint32 // atomic
 }
 
 func newClusterNode(clOpt *ClusterOptions, addr string) *clusterNode {
@@ -210,6 +213,7 @@ func (n *clusterNode) updateLatency() {
 		time.Sleep(time.Duration(10+rand.Intn(10)) * time.Millisecond)
 
 		start := time.Now()
+		// 使用ping命令来检测延迟。
 		n.Client.Ping(context.TODO())
 		dur += uint64(time.Since(start) / time.Microsecond)
 	}
@@ -259,8 +263,10 @@ func (n *clusterNode) SetGeneration(gen uint32) {
 type clusterNodes struct {
 	opt *ClusterOptions
 
-	mu          sync.RWMutex
-	addrs       []string
+	mu sync.RWMutex
+	// 所有的集群连接的地址。
+	addrs []string
+	// ip:port到节点的映射。
 	nodes       map[string]*clusterNode
 	activeAddrs []string
 	closed      bool
@@ -445,6 +451,7 @@ func (p clusterSlotSlice) Swap(i, j int) {
 }
 
 // clusterState：维护集群内「哈希槽=>节点」的映射，创建后不可修改，只能通过新建替换更新，每次新建 generation 自增。createdAt 为创建时间。
+// 包含所有的节点，然后包含主节点和从节点。
 type clusterState struct {
 	nodes   *clusterNodes
 	Masters []*clusterNode
@@ -689,10 +696,11 @@ func (c *clusterStateHolder) ReloadOrGet(ctx context.Context) (*clusterState, er
 //------------------------------------------------------------------------------
 
 type clusterClient struct {
-	opt           *ClusterOptions
-	nodes         *clusterNodes
-	state         *clusterStateHolder //nolint:structcheck
-	cmdsInfoCache *cmdsInfoCache      //nolint:structcheck
+	opt   *ClusterOptions
+	nodes *clusterNodes
+	state *clusterStateHolder //nolint:structcheck
+	// redis服务器的所有的命令信息。
+	cmdsInfoCache *cmdsInfoCache //nolint:structcheck
 }
 
 // ClusterClient is a Redis Cluster client representing a pool of zero
@@ -737,6 +745,7 @@ func (c *ClusterClient) Context() context.Context {
 	return c.ctx
 }
 
+// 可以定义context，用于传递环境参数和控制超时时间。
 func (c *ClusterClient) WithContext(ctx context.Context) *ClusterClient {
 	if ctx == nil {
 		panic("nil context")
@@ -1629,7 +1638,7 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 }
 
 func (c *ClusterClient) cmdInfo(name string) *CommandInfo {
-	cmdsInfo, err := c.cmdsInfoCache.Get(c.ctx) 	// 在这里会从服务器获取cmd的信息。
+	cmdsInfo, err := c.cmdsInfoCache.Get(c.ctx) // 在这里会从服务器获取cmd的信息。
 	if err != nil {
 		return nil
 	}

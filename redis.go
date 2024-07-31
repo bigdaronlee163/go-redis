@@ -715,6 +715,8 @@ func (c *Client) TxPipeline() Pipeliner {
 	return &pipe
 }
 
+// 这里返回用于pub和sub操作的结构体，结构体里面直接创建一个到redis的链接。
+// 这个不是线程安全的。
 func (c *Client) pubSub() *PubSub {
 	pubsub := &PubSub{
 		opt: c.opt,
