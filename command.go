@@ -2647,7 +2647,7 @@ type ClusterSlot struct {
 
 type ClusterSlotsCmd struct {
 	baseCmd
-
+	// 将结果分装成为 ClusterSlot 
 	val []ClusterSlot
 }
 
@@ -3258,6 +3258,7 @@ func (cmd *CommandsInfoCmd) readReply(rd *proto.Reader) error {
 	})
 	return err
 }
+
 // ReadReply 的回调函数。
 func commandInfoParser(rd *proto.Reader, n int64) (interface{}, error) {
 	const numArgRedis5 = 6
@@ -3361,6 +3362,8 @@ type cmdsInfoCache struct {
 	cmds map[string]*CommandInfo
 }
 
+// 在创建 NewClusterClient 的时候
+// 会将 ClusterClient 的 c.cmdsInfo 方法传递进来。
 func newCmdsInfoCache(fn func(ctx context.Context) (map[string]*CommandInfo, error)) *cmdsInfoCache {
 	return &cmdsInfoCache{
 		fn: fn,

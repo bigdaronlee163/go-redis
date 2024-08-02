@@ -181,6 +181,7 @@ type clusterNode struct {
 	failing uint32 // atomic
 }
 
+// 就是对 client 的包装。
 func newClusterNode(clOpt *ClusterOptions, addr string) *clusterNode {
 	// 从cluster中读取client的配置。然后根据这个配置创建客户端。
 	opt := clOpt.clientOptions()
@@ -267,6 +268,7 @@ type clusterNodes struct {
 	// 所有的集群连接的地址。
 	addrs []string
 	// ip:port到节点的映射。
+	//
 	nodes       map[string]*clusterNode
 	activeAddrs []string
 	closed      bool
@@ -333,6 +335,9 @@ func (c *clusterNodes) NextGeneration() uint32 {
 }
 
 // GC removes unused nodes.
+/*
+ GC 方法的条件是根据传入的 generation 参数判断节点是否仍在使用，如果节点的生成次数小于传入的 generation ，则将其视为未使用节点，删除并关闭其客户端连接。这样可以及时清理未使用的节点，释放资源并保持系统的稳定性。
+*/
 func (c *clusterNodes) GC(generation uint32) {
 	//nolint:prealloc
 	var collected []*clusterNode
@@ -363,7 +368,7 @@ func (c *clusterNodes) GC(generation uint32) {
 // 用到的时候，才创建。
 func (c *clusterNodes) GetOrCreate(addr string) (*clusterNode, error) {
 	node, err := c.get(addr)
-	if err != nil {
+	if err != nil { // 两个if判断的过程中，可能有别的节点创建了具体的node. [退出get方法，就释放了锁。]
 		return nil, err
 	}
 	if node != nil {
@@ -377,7 +382,7 @@ func (c *clusterNodes) GetOrCreate(addr string) (*clusterNode, error) {
 		return nil, pool.ErrClosed
 	}
 
-	node, ok := c.nodes[addr]
+	node, ok := c.nodes[addr] // 这个地方为什么还需要重新判断一遍呢？get方法中已经判断过了。
 	if ok {
 		return node, nil
 	}
@@ -430,7 +435,9 @@ func (c *clusterNodes) Random() (*clusterNode, error) {
 }
 
 // ------------------------------------------------------------------------------
-// clusterSlot：一个范围的哈希槽以及负责这些槽的节点（第一个为主节点，其余为从节点），start为起始哈希槽编号，end为起结束希槽编号，nodes为负责这些槽的节点。
+// clusterSlot：一个范围的哈希槽以及负责这些槽的节点（第一个为主节点，其余为从节点），
+// start为起始哈希槽编号，end为起结束希槽编号，nodes为负责这些槽的节点。
+// 【其中一个节点，参与集群，其余的节点作为该节点的备份参与。】
 type clusterSlot struct {
 	start, end int
 	nodes      []*clusterNode
@@ -456,7 +463,7 @@ type clusterState struct {
 	nodes   *clusterNodes
 	Masters []*clusterNode
 	Slaves  []*clusterNode
-
+	// 哈希槽段到节点的映射。包含槽段和节点的信息。
 	slots []*clusterSlot
 
 	generation uint32
@@ -466,6 +473,9 @@ type clusterState struct {
 func newClusterState(
 	nodes *clusterNodes, slots []ClusterSlot, origin string,
 ) (*clusterState, error) {
+	// 在函数内部，首先初始化了一个 clusterState 对象 c ，
+	// 设置了节点列表、槽信息、生成次数、创建时间等字段的初始值。
+	// 然后从源地址中提取主机名，并判断是否为回环地址。
 	c := clusterState{
 		nodes: nodes,
 
@@ -474,18 +484,21 @@ func newClusterState(
 		generation: nodes.NextGeneration(),
 		createdAt:  time.Now(),
 	}
-
+	// 从origin 中获取ip的信息。
 	originHost, _, _ := net.SplitHostPort(origin)
+	// 在函数内部，首先初始化了一个 clusterState 对象 c ，设置了节点列表、槽信息、生成次数、创建时间等字段的初始值。然后从源地址中提取主机名，并判断是否为回环地址。
+	// 回环地址（Loopback Address）是指计算机网络中的一种特殊的IP地址，用于将数据包发送给本地主机而不经过网络通信。在IPv4中，回环地址通常表示为127.0.0.1，而在IPv6中，回环地址通常表示为::1。
 	isLoopbackOrigin := isLoopback(originHost)
 
 	for _, slot := range slots {
+		// var 声明一个局部变量。
 		var nodes []*clusterNode
 		for i, slotNode := range slot.Nodes {
 			addr := slotNode.Addr
 			if !isLoopbackOrigin {
 				addr = replaceLoopbackHost(addr, originHost)
 			}
-
+			// 如果已经创建，直接返回即可。
 			node, err := c.nodes.GetOrCreate(addr)
 			if err != nil {
 				return nil, err
@@ -493,7 +506,7 @@ func newClusterState(
 
 			node.SetGeneration(c.generation)
 			nodes = append(nodes, node)
-
+			// 第一个为master节点，后续的为salve节点。
 			if i == 0 {
 				c.Masters = appendUniqueNode(c.Masters, node)
 			} else {
@@ -544,14 +557,19 @@ func isLoopback(host string) bool {
 	return ip.IsLoopback()
 }
 
+// 根据 slot 找到负责这个槽段的节点（节点组成： 一个主节点参与集群，多个从节点参与主节点的备份。）
+// 第一个节点就是master节点。
 func (c *clusterState) slotMasterNode(slot int) (*clusterNode, error) {
 	nodes := c.slotNodes(slot)
 	if len(nodes) > 0 {
 		return nodes[0], nil
 	}
+	// 为什么是随机创建一个节点？
+	// [TODO(DDD)]有说法的。
 	return c.nodes.Random()
 }
 
+// "All slaves are loading" 这个状态表示在集群中所有的从节点都处于负载过高的状态，无法正常处理请求。这种情况可能出现在集群负载过大、从节点资源不足、网络问题等情况下。
 func (c *clusterState) slotSlaveNode(slot int) (*clusterNode, error) {
 	nodes := c.slotNodes(slot)
 	switch len(nodes) {
@@ -564,7 +582,7 @@ func (c *clusterState) slotSlaveNode(slot int) (*clusterNode, error) {
 			return slave, nil
 		}
 		return nodes[0], nil
-	default:
+	default: // 并且所有的从节点都处于负载过高的状态（即都处于 Failing() 状态），则会进入 default 分支。在这种情况下，代码会尝试随机选择一个非负载过高的从节点，最多尝试10次。如果所有的从节点都处于负载过高状态，那么最终会选择使用主节点来处理请求。
 		var slave *clusterNode
 		for i := 0; i < 10; i++ {
 			n := rand.Intn(len(nodes)-1) + 1
@@ -580,6 +598,7 @@ func (c *clusterState) slotSlaveNode(slot int) (*clusterNode, error) {
 }
 
 func (c *clusterState) slotClosestNode(slot int) (*clusterNode, error) {
+	// 找到槽段对应的节点。
 	nodes := c.slotNodes(slot)
 	if len(nodes) == 0 {
 		return c.nodes.Random()
@@ -590,6 +609,7 @@ func (c *clusterState) slotClosestNode(slot int) (*clusterNode, error) {
 		if n.Failing() {
 			continue
 		}
+		// 找到槽段中延迟最小的节点。
 		if node == nil || n.Latency() < node.Latency() {
 			node = n
 		}
@@ -620,12 +640,15 @@ func (c *clusterState) slotRandomNode(slot int) (*clusterNode, error) {
 }
 
 func (c *clusterState) slotNodes(slot int) []*clusterNode {
+	// 找到比传入slot大的槽位对应的节点。
 	i := sort.Search(len(c.slots), func(i int) bool {
-		return c.slots[i].end >= slot
+		// 谓词函数。
+		return c.slots[i].end >= slot // 是下一个槽的start
 	})
 	if i >= len(c.slots) {
 		return nil
 	}
+	// 根据slot 找到对应的节点。【每个】
 	x := c.slots[i]
 	if slot >= x.start && slot <= x.end {
 		return x.nodes
@@ -634,7 +657,12 @@ func (c *clusterState) slotNodes(slot int) []*clusterNode {
 }
 
 //------------------------------------------------------------------------------
+/*
+-  load ：一个函数类型，用于在给定的上下文中加载集群状态并返回。
+-  state ：一个 atomic.Value 类型，用于存储集群状态。
+-  reloading ：一个 uint32 类型，用于表示是否正在重新加载集群状态的标志，采用原子操作保证并发安全。
 
+*/
 type clusterStateHolder struct {
 	load func(ctx context.Context) (*clusterState, error)
 
@@ -642,12 +670,14 @@ type clusterStateHolder struct {
 	reloading uint32 // atomic
 }
 
+// 就传入一个 fn，该fn返回 clusterState
 func newClusterStateHolder(fn func(ctx context.Context) (*clusterState, error)) *clusterStateHolder {
 	return &clusterStateHolder{
 		load: fn,
 	}
 }
 
+// 重新加载集群的信息  load 方法中就是随机选择一个集群节点，获取集群的状态信息。
 func (c *clusterStateHolder) Reload(ctx context.Context) (*clusterState, error) {
 	state, err := c.load(ctx)
 	if err != nil {
@@ -1026,8 +1056,15 @@ func (c *ClusterClient) PoolStats() *PoolStats {
 	return &acc
 }
 
+/*
+1. 加载集群状态，go-redis 通过一个 clusterStateHolder 来完成延迟加载。（好设计呀。我的了。）
+*/
 func (c *ClusterClient) loadState(ctx context.Context) (*clusterState, error) {
 	if c.opt.ClusterSlots != nil {
+		// 调用cluster slots获取槽段信息。 node.Client.ClusterSlots(ctx).Result()
+		// 槽段信息：节点。
+		// opt 中的 ClusterSlots 是一个方法，可以用来获取槽位信息。（例如zookeeer）
+		// 而下面的 ClusterSlots 就是利用 cluster的方法获取槽位信息的。（标准的获取方法。）
 		slots, err := c.opt.ClusterSlots(ctx)
 		if err != nil {
 			return nil, err
@@ -1052,7 +1089,8 @@ func (c *ClusterClient) loadState(ctx context.Context) (*clusterState, error) {
 			}
 			continue
 		}
-
+		// 使用 cluster slots 方法获取集群的信息。
+		// slots 是 ClusterSlot
 		slots, err := node.Client.ClusterSlots(ctx).Result()
 		if err != nil {
 			if firstErr == nil {
@@ -1060,7 +1098,7 @@ func (c *ClusterClient) loadState(ctx context.Context) (*clusterState, error) {
 			}
 			continue
 		}
-
+		// node.Client.opt.Addr 表示了当前的集群的state是从哪里获取的，并且可以在 newClusterState 中可以根据地址的信息，将其他集群中的节点的地址信息从域名转成ip地址。
 		return newClusterState(c.nodes, slots, node.Client.opt.Addr)
 	}
 
@@ -1630,7 +1668,7 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 			firstErr = err
 		}
 	}
-
+	// 为什么 firstErr 等于 nil的时候，是这个报错。
 	if firstErr == nil {
 		panic("not reached")
 	}
