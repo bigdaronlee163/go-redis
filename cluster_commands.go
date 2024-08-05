@@ -5,7 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 )
-
+// 集群的相关命令。
+// 
 func (c *ClusterClient) DBSize(ctx context.Context) *IntCmd {
 	cmd := NewIntCmd(ctx, "dbsize")
 	_ = c.hooks.process(ctx, cmd, func(ctx context.Context, _ Cmder) error {

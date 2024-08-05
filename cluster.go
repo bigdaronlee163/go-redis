@@ -214,7 +214,7 @@ func (n *clusterNode) updateLatency() {
 		time.Sleep(time.Duration(10+rand.Intn(10)) * time.Millisecond)
 
 		start := time.Now()
-		// 使用ping命令来检测延迟。
+		// 使用 ping 命令来检测延迟。
 		n.Client.Ping(context.TODO())
 		dur += uint64(time.Since(start) / time.Microsecond)
 	}
@@ -239,6 +239,7 @@ func (n *clusterNode) Failing() bool {
 	if failing == 0 {
 		return false
 	}
+	// 如果没过这个 timeout 持续时间，则认为节点还在下线中。
 	if time.Now().Unix()-int64(failing) < timeout {
 		return true
 	}
@@ -269,7 +270,8 @@ type clusterNodes struct {
 	addrs []string
 	// ip:port到节点的映射。
 	//
-	nodes       map[string]*clusterNode
+	nodes map[string]*clusterNode
+	// 会定期移除节点，通过 clusterNode 中的 generation
 	activeAddrs []string
 	closed      bool
 
@@ -470,6 +472,7 @@ type clusterState struct {
 	createdAt  time.Time
 }
 
+// 工厂函数，创建一个 ClusterState 在这里设置集群的代数，初始的代数，从nodes中获取到。
 func newClusterState(
 	nodes *clusterNodes, slots []ClusterSlot, origin string,
 ) (*clusterState, error) {
@@ -480,9 +483,9 @@ func newClusterState(
 		nodes: nodes,
 
 		slots: make([]*clusterSlot, 0, len(slots)),
-
+		// 从nodes中获取。
 		generation: nodes.NextGeneration(),
-		createdAt:  time.Now(),
+		createdAt:  time.Now(), // 创建时间判断，state的更新的状态。
 	}
 	// 从origin 中获取ip的信息。
 	originHost, _, _ := net.SplitHostPort(origin)
@@ -503,7 +506,7 @@ func newClusterState(
 			if err != nil {
 				return nil, err
 			}
-
+			// 从集群状态中，获取创建时候的代数。
 			node.SetGeneration(c.generation)
 			nodes = append(nodes, node)
 			// 第一个为master节点，后续的为salve节点。
@@ -601,6 +604,7 @@ func (c *clusterState) slotClosestNode(slot int) (*clusterNode, error) {
 	// 找到槽段对应的节点。
 	nodes := c.slotNodes(slot)
 	if len(nodes) == 0 {
+		// 随机返回一个节点，对应的操作不在这个节点上怎么处理呢？
 		return c.nodes.Random()
 	}
 
@@ -673,6 +677,7 @@ type clusterStateHolder struct {
 // 就传入一个 fn，该fn返回 clusterState
 func newClusterStateHolder(fn func(ctx context.Context) (*clusterState, error)) *clusterStateHolder {
 	return &clusterStateHolder{
+		// 设置如何加载集群的状态。
 		load: fn,
 	}
 }
@@ -683,11 +688,23 @@ func (c *clusterStateHolder) Reload(ctx context.Context) (*clusterState, error) 
 	if err != nil {
 		return nil, err
 	}
+	// 存储在 atomic.Value 中。
 	c.state.Store(state)
 	return state, nil
 }
 
+/*
+这段代码中的Lazy设计体现在 LazyReload 函数中的goroutine调用。
+在该函数中，首先通过 atomic.CompareAndSwapUint32 方法来判断是否可以进行reload操作，
+如果可以则将 c.reloading 的值从0更新为1，然后启动一个goroutine执行reload操作。
+在goroutine中，会调用 c.Reload 方法进行实际的reload操作，
+然后通过 time.Sleep(200 * time.Millisecond) 来模拟延迟，
+这里的延迟就是Lazy设计的一部分。
+
+Lazy设计的目的是延迟加载或延迟执行操作，以提高性能或节省资源。
+*/
 func (c *clusterStateHolder) LazyReload() {
+	//
 	if !atomic.CompareAndSwapUint32(&c.reloading, 0, 1) {
 		return
 	}
@@ -709,24 +726,32 @@ func (c *clusterStateHolder) Get(ctx context.Context) (*clusterState, error) {
 	}
 
 	state := v.(*clusterState)
+	// 已经超过10秒没有更新了，就需要更新集群信息。
 	if time.Since(state.createdAt) > 10*time.Second {
 		c.LazyReload()
 	}
 	return state, nil
 }
 
+// 重新获取没有获取到，然后使用历史的集群状态。
 func (c *clusterStateHolder) ReloadOrGet(ctx context.Context) (*clusterState, error) {
 	state, err := c.Reload(ctx)
 	if err == nil {
 		return state, nil
 	}
+	// 历史的状态。
 	return c.Get(ctx)
 }
 
 //------------------------------------------------------------------------------
 
 type clusterClient struct {
-	opt   *ClusterOptions
+	opt *ClusterOptions
+	// nodes和state有一种分离的感觉。
+	// clusterNodes 更多是维护到服务器节点的连接，
+	// 而state，更多的事维护服务器（集群）的状态。
+	// 客户端需要根据state来选择不同的服务器节点来执行相应的操作。
+	// 并且go-redis还维护了节点的延迟，可以根据这些到服务器节点连接的状态信息，来选择执行不同的路由政策。
 	nodes *clusterNodes
 	state *clusterStateHolder //nolint:structcheck
 	// redis服务器的所有的命令信息。
@@ -776,6 +801,7 @@ func (c *ClusterClient) Context() context.Context {
 }
 
 // 可以定义context，用于传递环境参数和控制超时时间。
+// 创建一个cluster client 可以通过这个方法，来重新配置一个context，用于控制goroutine的超时、取消操作。
 func (c *ClusterClient) WithContext(ctx context.Context) *ClusterClient {
 	if ctx == nil {
 		panic("nil context")
@@ -807,6 +833,7 @@ func (c *ClusterClient) Close() error {
 }
 
 // Do creates a Cmd from the args and processes the cmd.
+// 创建自定义的命令。
 func (c *ClusterClient) Do(ctx context.Context, args ...interface{}) *Cmd {
 	cmd := NewCmd(ctx, args...)
 	_ = c.Process(ctx, cmd)
@@ -824,9 +851,10 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 	slot := c.cmdSlot(cmd)
 	// clusterNode 对 Client的封装。（client共享一个连接池吗？ ）
 	var node *clusterNode
-	var ask bool
+	var ask bool // for循环中可能被赋值。
 	var lastErr error
 	for attempt := 0; attempt <= c.opt.MaxRedirects; attempt++ {
+		// 尝试之前，需要随机等待一会儿。
 		if attempt > 0 {
 			if err := internal.Sleep(ctx, c.retryBackoff(attempt)); err != nil {
 				return err
@@ -835,6 +863,8 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 
 		if node == nil {
 			var err error
+			// 根据命令和slot找到对应的节点。
+			// 并且根据cmd的信息，判断是否是只读命令，如果是只读命令，可以转发到对应槽位的slave节点。
 			node, err = c.cmdNode(ctx, cmdInfo, slot)
 			if err != nil {
 				return err
@@ -912,14 +942,15 @@ func (c *ClusterClient) ForEachMaster(
 	if err != nil {
 		return err
 	}
-
+	// 需要同时在多个master上面执行同样的操作。
+	// 传入fn代表要在master上执行的操作。
 	var wg sync.WaitGroup
 	errCh := make(chan error, 1)
 
 	for _, master := range state.Masters {
 		wg.Add(1)
 		go func(node *clusterNode) {
-			defer wg.Done()
+			defer wg.Done() // 如果发生错误，会再函数退出的时候，执行Done() 函数。
 			err := fn(ctx, node.Client)
 			if err != nil {
 				select {
@@ -980,6 +1011,7 @@ func (c *ClusterClient) ForEachSlave(
 
 // ForEachShard concurrently calls the fn on each known node in the cluster.
 // It returns the first error if any.
+// 在每个节点上执行。
 func (c *ClusterClient) ForEachShard(
 	ctx context.Context,
 	fn func(ctx context.Context, client *Client) error,
@@ -1030,7 +1062,7 @@ func (c *ClusterClient) PoolStats() *PoolStats {
 	if state == nil {
 		return &acc
 	}
-
+	// 这里可以证明
 	for _, node := range state.Masters {
 		s := node.Client.connPool.Stats()
 		acc.Hits += s.Hits
@@ -1125,7 +1157,8 @@ func (c *ClusterClient) reaper(idleCheckFrequency time.Duration) {
 		if err != nil {
 			break
 		}
-
+		// 对集群中的节点所建立的连接进行清理。
+		// ClusterClient是多个到集群中节点的连接的集合。
 		for _, node := range nodes {
 			_, err := node.Client.connPool.(*pool.ConnPool).ReapStaleConns()
 			if err != nil {
@@ -1135,6 +1168,7 @@ func (c *ClusterClient) reaper(idleCheckFrequency time.Duration) {
 	}
 }
 
+// 返回一个可以执行pipeline操作的管道客户端。
 func (c *ClusterClient) Pipeline() Pipeliner {
 	pipe := Pipeline{
 		ctx:  c.ctx,
@@ -1152,14 +1186,16 @@ func (c *ClusterClient) processPipeline(ctx context.Context, cmds []Cmder) error
 	return c.hooks.processPipeline(ctx, cmds, c._processPipeline)
 }
 
+// 集群上的管道操作。
 func (c *ClusterClient) _processPipeline(ctx context.Context, cmds []Cmder) error {
+	// 一个节点和可能的多个命令的map
 	cmdsMap := newCmdsMap()
 	err := c.mapCmdsByNode(ctx, cmdsMap, cmds)
 	if err != nil {
 		setCmdsErr(cmds, err)
 		return err
 	}
-
+	// 开始执行。
 	for attempt := 0; attempt <= c.opt.MaxRedirects; attempt++ {
 		if attempt > 0 {
 			if err := internal.Sleep(ctx, c.retryBackoff(attempt)); err != nil {
@@ -1167,10 +1203,10 @@ func (c *ClusterClient) _processPipeline(ctx context.Context, cmds []Cmder) erro
 				return err
 			}
 		}
-
+		// 记录执行失败的命令。
 		failedCmds := newCmdsMap()
 		var wg sync.WaitGroup
-
+		// 这里就是go的并发执行，将命令分发到对应的节点上执行。
 		for node, cmds := range cmdsMap.m {
 			wg.Add(1)
 			go func(node *clusterNode, cmds []Cmder) {
@@ -1205,19 +1241,22 @@ func (c *ClusterClient) mapCmdsByNode(ctx context.Context, cmdsMap *cmdsMap, cmd
 	if err != nil {
 		return err
 	}
-
+	// 如果命令是只读命令，并且客户端配置了只读模式，那么只从从节点执行命令。
 	if c.opt.ReadOnly && c.cmdsAreReadOnly(cmds) {
 		for _, cmd := range cmds {
+			// 获取 cmd 的 slot
 			slot := c.cmdSlot(cmd)
+			// 根据slot获取可读节点。
 			node, err := c.slotReadOnlyNode(state, slot)
 			if err != nil {
 				return err
 			}
+			// 添加到对应的节点上。
 			cmdsMap.Add(node, cmd)
 		}
 		return nil
 	}
-
+	// 这个地方为什么选择master节点，因为没有配置只读模式。
 	for _, cmd := range cmds {
 		slot := c.cmdSlot(cmd)
 		node, err := state.slotMasterNode(slot)
@@ -1243,6 +1282,7 @@ func (c *ClusterClient) _processPipelineNode(
 	ctx context.Context, node *clusterNode, cmds []Cmder, failedCmds *cmdsMap,
 ) error {
 	return node.Client.hooks.processPipeline(ctx, cmds, func(ctx context.Context, cmds []Cmder) error {
+		// clusterNode 找到底层的 clusterNode 执行读写操作。
 		return node.Client.withConn(ctx, func(ctx context.Context, cn *pool.Conn) error {
 			err := cn.WithWriter(ctx, c.opt.WriteTimeout, func(wr *proto.Writer) error {
 				return writeCmds(wr, cmds)
@@ -1258,6 +1298,7 @@ func (c *ClusterClient) _processPipelineNode(
 	})
 }
 
+// pipelineReadCmds 读取pipeline命令的结果。
 func (c *ClusterClient) pipelineReadCmds(
 	ctx context.Context,
 	node *clusterNode,
@@ -1266,13 +1307,14 @@ func (c *ClusterClient) pipelineReadCmds(
 	failedCmds *cmdsMap,
 ) error {
 	for _, cmd := range cmds {
+		// 每个cmd都有自己的radReply函数。如果有响应的话，每个命令的响应，按照命令请求的顺序返回。
 		err := cmd.readReply(rd)
 		cmd.SetErr(err)
 
 		if err == nil {
 			continue
 		}
-
+		// 处理moved和ask错误。【可能在命令的执行过程中，存在slot切换的坑你吧。 】
 		if c.checkMovedErr(ctx, cmd, err, failedCmds) {
 			continue
 		}
@@ -1289,14 +1331,16 @@ func (c *ClusterClient) pipelineReadCmds(
 	return nil
 }
 
+// 处理moved操作的函数。
 func (c *ClusterClient) checkMovedErr(
 	ctx context.Context, cmd Cmder, err error, failedCmds *cmdsMap,
 ) bool {
+	// 判断是否是moved或者ask错误。 （isMovedError 通过前缀来判断）
 	moved, ask, addr := isMovedError(err)
 	if !moved && !ask {
 		return false
 	}
-
+	// 获取节点。
 	node, err := c.nodes.GetOrCreate(addr)
 	if err != nil {
 		return false
@@ -1312,7 +1356,7 @@ func (c *ClusterClient) checkMovedErr(
 		failedCmds.Add(node, NewCmd(ctx, "asking"), cmd)
 		return true
 	}
-
+	// 这个地方，会直接panic，表示集群处于不可用的状态中。
 	panic("not reached")
 }
 
@@ -1395,6 +1439,7 @@ func (c *ClusterClient) _processTxPipeline(ctx context.Context, cmds []Cmder) er
 	return cmdsFirstErr(cmds)
 }
 
+// 按slot分配命令，mapCmdsByNode 按 node 分组。（本质也是按slot分组，然后将同一个slot的归到同一个节点上。 ）
 func (c *ClusterClient) mapCmdsBySlot(cmds []Cmder) map[int][]Cmder {
 	cmdsMap := make(map[int][]Cmder)
 	for _, cmd := range cmds {
@@ -1715,13 +1760,15 @@ func (c *ClusterClient) cmdNode(
 	if err != nil {
 		return nil, err
 	}
-
+	// 悬停鼠标看 ReadOnly参数的注释。
 	if c.opt.ReadOnly && cmdInfo != nil && cmdInfo.ReadOnly {
 		return c.slotReadOnlyNode(state, slot)
 	}
+	// 默认操作还是给到在集群中的主节点。
 	return state.slotMasterNode(slot)
 }
 
+// 默认是slave节点读取，如果有其他的配置，就使用其他的节点来完成读取的操作。
 func (c *clusterClient) slotReadOnlyNode(state *clusterState, slot int) (*clusterNode, error) {
 	if c.opt.RouteByLatency {
 		return state.slotClosestNode(slot)
@@ -1732,6 +1779,7 @@ func (c *clusterClient) slotReadOnlyNode(state *clusterState, slot int) (*cluste
 	return state.slotSlaveNode(slot)
 }
 
+// 通过slot选择，master节点。
 func (c *ClusterClient) slotMasterNode(ctx context.Context, slot int) (*clusterNode, error) {
 	state, err := c.state.Get(ctx)
 	if err != nil {
@@ -1746,6 +1794,8 @@ func (c *ClusterClient) slotMasterNode(ctx context.Context, slot int) (*clusterN
 // This is because other redis commands generally have a flag that points that
 // they are read only and automatically run on the replica nodes
 // if ClusterOptions.ReadOnly flag is set to true.
+// 根据key计算出来的slot，找到一个slave节点，完成只读操作（或者只包含只读命令的lua脚本）
+// 这个方法和下面的MasterForKey方法，都是为了对 key 完成节点的选择。
 func (c *ClusterClient) SlaveForKey(ctx context.Context, key string) (*Client, error) {
 	state, err := c.state.Get(ctx)
 	if err != nil {
@@ -1771,6 +1821,7 @@ func (c *ClusterClient) MasterForKey(ctx context.Context, key string) (*Client, 
 
 func appendUniqueNode(nodes []*clusterNode, node *clusterNode) []*clusterNode {
 	for _, n := range nodes {
+		// 如果已经存在了，就不添加了。
 		if n == node {
 			return nodes
 		}
@@ -1778,6 +1829,7 @@ func appendUniqueNode(nodes []*clusterNode, node *clusterNode) []*clusterNode {
 	return append(nodes, node)
 }
 
+// 不存在才添加。 ip:port 信息。
 func appendIfNotExists(ss []string, es ...string) []string {
 loop:
 	for _, e := range es {
@@ -1791,8 +1843,8 @@ loop:
 	return ss
 }
 
-//------------------------------------------------------------------------------
-
+// ------------------------------------------------------------------------------
+// 在 pipeline 中的操作。
 type cmdsMap struct {
 	mu sync.Mutex
 	m  map[*clusterNode][]Cmder

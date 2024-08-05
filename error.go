@@ -117,18 +117,22 @@ func isMovedError(err error) (moved bool, ask bool, addr string) {
 	if ind == -1 {
 		return false, false, ""
 	}
+	// 返回正确的节点。
 	addr = s[ind+1:]
 	return
 }
 
+// 这个函数检查错误信息是否以 "LOADING " 开头。这个错误通常表示 Redis 服务器正在加载数据，无法处理请求。
 func isLoadingError(err error) bool {
 	return strings.HasPrefix(err.Error(), "LOADING ")
 }
 
+// 这个函数检查错误信息是否以 "READONLY " 开头。这个错误通常表示在主从复制的环境中，客户端试图在只读的从节点上执行写操作。
 func isReadOnlyError(err error) bool {
 	return strings.HasPrefix(err.Error(), "READONLY ")
 }
 
+// 这个函数检查错误信息是否以 "MOVED " 开头，并且错误信息的结尾是否包含指定的地址。这个错误通常表示请求的键被移动到另一个 Redis 节点，客户端需要更新其连接到新的节点。
 func isMovedSameConnAddr(err error, addr string) bool {
 	redisError := err.Error()
 	if !strings.HasPrefix(redisError, "MOVED ") {

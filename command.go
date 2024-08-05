@@ -47,6 +47,7 @@ func cmdsFirstErr(cmds []Cmder) error {
 	return nil
 }
 
+// 写入多个命令。
 func writeCmds(wr *proto.Writer, cmds []Cmder) error {
 	for _, cmd := range cmds {
 		if err := writeCmd(wr, cmd); err != nil {
@@ -2647,7 +2648,7 @@ type ClusterSlot struct {
 
 type ClusterSlotsCmd struct {
 	baseCmd
-	// 将结果分装成为 ClusterSlot 
+	// 将结果分装成为 ClusterSlot
 	val []ClusterSlot
 }
 

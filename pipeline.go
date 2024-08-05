@@ -38,6 +38,7 @@ var _ Pipeliner = (*Pipeline)(nil)
 // Pipeline implements pipelining as described in
 // http://redis.io/topics/pipelining. It's safe for concurrent use
 // by multiple goroutines.
+// Pipeline 实现了管道操作。
 type Pipeline struct {
 	cmdable
 	statefulCmdable
@@ -139,10 +140,12 @@ func (c *Pipeline) Pipeline() Pipeliner {
 	return c
 }
 
+// 
 func (c *Pipeline) TxPipelined(ctx context.Context, fn func(Pipeliner) error) ([]Cmder, error) {
 	return c.Pipelined(ctx, fn)
 }
 
+// 返回tx的pipe操作。
 func (c *Pipeline) TxPipeline() Pipeliner {
 	return c
 }
